@@ -112,6 +112,7 @@ class Propagate:
         '''
         Returns derivative of state variables
         supports thrust
+        meant as an internal helper, not private bc maybe helpful at some point
         Input Args:
             time:int = scalar time value
             state:array(6,1) = state array in 3D

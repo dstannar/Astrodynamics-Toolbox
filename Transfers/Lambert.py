@@ -18,6 +18,7 @@ class Lambert:
             self.v1 = v1
             self.v2 = v2
             self.dv = dv
+            return v1, v2, dv
         else:
             # eventually try more solvers, but for now:
             raise RuntimeError('Failed to Solve Lambert')
