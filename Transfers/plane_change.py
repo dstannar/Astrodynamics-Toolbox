@@ -47,7 +47,7 @@ def plane_change(orbit1, orbit2):
 
 def best_nodal_crossing(orbit1, orbit2, dt=1):
     '''
-    gets nodal crossing point with lowest velocity for cheapest dV burn
+    gets nodal crossing point
     
     '''
     hvec1 = orbit1.hvec
