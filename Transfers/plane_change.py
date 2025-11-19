@@ -45,11 +45,12 @@ def plane_change(orbit1, orbit2):
 
     return burn_loc, burn_time, dVmag
 
-def best_nodal_crossing(orbit1, orbit2, dt=1):
+def nodal_crossing(orbit1, orbit2, dt=1):
     '''
     gets nodal crossing point
     
     '''
+    # ang mom. vecs from orbit objects
     hvec1 = orbit1.hvec
     hvec2 = orbit2.hvec
 
