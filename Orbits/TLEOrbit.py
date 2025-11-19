@@ -124,6 +124,7 @@ class TLEOrbit:
         self.energy = energy
         self.EA = ea
         self.MA = ma
+        self.hvec = h
 
     def coes_to_state(self):
         hmag = self.hmag

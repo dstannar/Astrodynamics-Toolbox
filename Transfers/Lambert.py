@@ -3,7 +3,7 @@ from MathHelpers.constants import muE
 from MathHelpers.stumpff import stumpffC, stumpffS
 
 class Lambert:
-    def __init__(self, r0, r1, tof, mu=muE, nrev=0, shortWay=True):
+    def __init__(self, r0, r1, tof, mu=muE, nrev=0, shortWay=True, verbose=False):
         # assign to self
         self.r0 = r0
         self.r1 = r1
@@ -11,6 +11,7 @@ class Lambert:
         self.nrev = nrev
         self.shortWay = shortWay
         self.mu = mu
+        self.verbose = verbose
 
     def robust_solve(self):
         v1, v2, dv, exitFlag = self.solve_lambertUV()
@@ -21,7 +22,9 @@ class Lambert:
             return v1, v2, dv
         else:
             # eventually try more solvers, but for now:
-            raise RuntimeError('Failed to Solve Lambert')
+            if self.verbose:
+                print('failed to solve')
+            return np.nan, np.nan, np.nan
 
     def solve_lambertUV(self):
         mu = self.mu
@@ -58,7 +61,7 @@ class Lambert:
         z_upper = 4 * np.pi**2      # upper z bound
         z_lower = -4 * np.pi**2     # lower z bound
         tol = 1e-8                  # solver tol.
-        max_iteration = 10000       # max iterations
+        max_iteration = 100       # max iterations
         iteration = 0               
 
         # init solver values
@@ -68,14 +71,12 @@ class Lambert:
         y = r1 + r2 + A * (z * S - 1) / np.sqrt(C) 
         x = np.sqrt(y / C)           
         dt_loop = x**3 * S / np.sqrt(mu) + A * np.sqrt(y) / np.sqrt(mu)
-
         # iterate on universal variable z with bisection method
         while abs(dt_loop - tof) > tol and iteration < max_iteration:
             if dt_loop < tof:
                 z_lower = z
             else:
                 z_upper = z
-
             z = (z_upper + z_lower) / 2
             C = stumpffC(z)
             S = stumpffS(z)
@@ -86,8 +87,7 @@ class Lambert:
             y = r1 + r2 + A * (z * S - 1) / np.sqrt(C)
             if y < 0:
                 z = (z_upper + z_lower) / 2
-                continue
-
+            
             x = np.sqrt(y / C)
             dt_loop = x**3 * S / np.sqrt(mu) + A * np.sqrt(y) / np.sqrt(mu)
             iteration += 1
@@ -95,7 +95,7 @@ class Lambert:
             # escape clause
             if iteration == max_iteration:
                 badSolve = True
-
+                
         # handle bisection method failure
         if badSolve:
             return np.full(3, np.nan), np.full(3, np.nan), np.nan, -2

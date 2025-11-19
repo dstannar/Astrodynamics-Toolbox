@@ -6,7 +6,7 @@ from MathHelpers.solve_universal_anomaly import solve_universal_anomaly
 from MathHelpers.stumpff import stumpffC, stumpffS
 
 class Propagate:
-    def __init__(self, Orbit, prop_time, thrust=None, burnTime = None, Isp = None, mass=None, rtol = 1e-8, atol = 1e-8, mu=muE):
+    def __init__(self, Orbit, prop_time, thrust=0, burnTime = None, Isp = None, mass=None, rtol = 1e-8, atol = 1e-8, mu=muE, verbose=False):
         self.Orbit = Orbit # orbit object
         self.prop_time = prop_time
         self.mu = mu
@@ -15,6 +15,9 @@ class Propagate:
         self.Isp = Isp
         self.rtol = rtol
         self.atol = atol
+        self.mass = mass
+        self.verbose = verbose
+
 
     def twobody_ODE(self, plot=False):
         '''
@@ -41,7 +44,7 @@ class Propagate:
             state = np.concatenate((r0, v0, [float(m0)]))
 
         def ivp_wrapper(t,y):
-            return self.twobodymotion(t, y, self.thrust, self.burnTime, self.Isp, MU = muE)
+            return self.twobodymotion(t, y, self.thrust, self.burnTime, self.Isp)
 
         solution = solve_ivp(ivp_wrapper, tspan, state, rtol=rtol, atol=atol)
         
@@ -71,7 +74,11 @@ class Propagate:
         r = y[:3, -1] # [x_f, y_f, z_f]
         v = y[3:6, -1] # [vx_f, vy_f, vz_f]
 
-        return r, v, solution
+        if self.verbose == False:
+            return r, v
+        elif self.verbose == True:
+            return r, v, solution
+
 
 
     def lagrange_coeff(self):
@@ -105,10 +112,13 @@ class Propagate:
 
         v1 = fdot*r0 + gdot*v0
 
-        return r1, v1, f, g, fdot, gdot 
+        if self.verbose == True:
+            return r1, v1, f, g, fdot, gdot 
+        elif self.verbose == False:
+            return r1, v1
 
-
-    def twobodymotion(self):
+    @staticmethod
+    def twobodymotion(t, y, thrust, burnTime, Isp, MU = muE):
         '''
         Returns derivative of state variables
         supports thrust
@@ -119,13 +129,8 @@ class Propagate:
         Outputs:
             dstate = derivative of the state for the 2 body problem
         '''
-        state = self.state
-        MU = self.mu
-        thrust = self.thrust
-        burnTime = self.burnTime
-        time = self.time
-        Isp = self.Isp
-
+        state = y
+        time = t
 
         if len(state) == 7:
             x, y, z, vx, vy, vz, m = state
