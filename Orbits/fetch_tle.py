@@ -223,9 +223,7 @@ def _query_omm_latest_kvn(session: requests.Session, norad_id: int) -> Optional[
     text = _st_get(session, suffix)
     return text if text else None
 
-# ===========================
-# Public API
-# ===========================
+
 def fetch_tle(
     norad_id: int,
     identity: str = 'dstannar@calpoly.edu',
@@ -311,25 +309,10 @@ def fetch_tle_spacetrack_bulk(
     return results
 
 def spacetrack_logout(identity: str, password: str) -> None:
-    """Best-effort logout (optional)."""
+    """logout of spacetrak"""
     try:
         sess = _st_login_session(identity, password, timeout=REQUEST_TIMEOUT)
         time.sleep(POLITE_DELAY_S)
         sess.get(ST_LOGOUT_URL, timeout=REQUEST_TIMEOUT)
     except Exception:
         pass
-
-# ===========================
-# Example usage
-# ===========================
-if __name__ == "__main__":
-    # Example: pull ISS
-    USER = os.getenv("ST_USER", "YOUR_USERNAME")
-    PASS = os.getenv("ST_PASS", "YOUR_PASSWORD")
-    try:
-        name, l1, l2 = fetch_tle_spacetrack(25544, USER, PASS)
-        print(name or "UNKNOWN")
-        print(l1)
-        print(l2)
-    except SpaceTrackNoTLEError as e:
-        print(f"[WARN] {e}. OMM snippet:\n{e.omm_kvn or '(none)'}")

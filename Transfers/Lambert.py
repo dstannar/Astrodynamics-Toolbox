@@ -14,17 +14,16 @@ class Lambert:
         self.verbose = verbose
 
     def robust_solve(self):
-        v1, v2, dv, exitFlag = self.solve_lambertUV()
+        v1, v2, exitFlag = self.solve_lambertUV()
         if exitFlag == 1:
             self.v1 = v1
             self.v2 = v2
-            self.dv = dv
-            return v1, v2, dv
+            return v1, v2, exitFlag
         else:
             # eventually try more solvers, but for now:
             if self.verbose:
                 print('failed to solve')
-            return np.nan, np.nan, np.nan
+            return np.full(3, np.nan), np.full(3, np.nan), -1
 
     def solve_lambertUV(self):
         mu = self.mu
@@ -54,7 +53,7 @@ class Lambert:
         if A == 0:
             print("Transfer not possible, A = 0")
             # return nan, nan, nan, exitFlag = -1
-            return np.full(3, np.nan), np.full(3, np.nan), np.nan, -1
+            return np.full(3, np.nan), np.full(3, np.nan), -1
 
         # initial guess, bounds, solver tols
         z = 0                       # initial guess
@@ -96,9 +95,9 @@ class Lambert:
             if iteration == max_iteration:
                 badSolve = True
                 
-        # handle bisection method failure
+        # handle bisection method failure fast
         if badSolve:
-            return np.full(3, np.nan), np.full(3, np.nan), np.nan, -2
+            return np.full(3, np.nan), np.full(3, np.nan), -2
 
         # stumpff call
         C = stumpffC(z)
@@ -117,7 +116,8 @@ class Lambert:
         # velo vectors from lagrange coeff
         v1_vect = (r2_vect - f * r1_vect) / g
         v2_vect = fdot * r1_vect + gdot * v1_vect
-        dv = np.linalg.norm(v2_vect - v1_vect)
+        dv = v2_vect - v1_vect
+        dvMag = np.linalg.norm(dv)
 
         # return solution with positive exitFlag (success)
-        return v1_vect, v2_vect, dv, 1
+        return v1_vect, v2_vect, 1

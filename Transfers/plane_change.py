@@ -34,7 +34,7 @@ def inc_change(orbit1, orbit2, dt=1, mu=muE):
    
 
 def plane_change(orbit1, orbit2):
-    # vallado alg 41
+    
     intersectionPos, intersectionVel, intersectionTime = best_nodal_crossing(orbit1, orbit2)
 
     
@@ -45,7 +45,7 @@ def plane_change(orbit1, orbit2):
 
     return burn_loc, burn_time, dVmag
 
-def nodal_crossing(orbit1, orbit2, dt=1):
+def best_nodal_crossing(orbit1, orbit2, dt=1):
     '''
     gets nodal crossing point
     
@@ -56,7 +56,7 @@ def nodal_crossing(orbit1, orbit2, dt=1):
 
     # get shared node line
     node_vect = np.cross(hvec1, hvec2)
-    norm_node = np.linalg.norm(node_vect)
+    node_unit_vect = node_vect / np.linalg.norm(node_vect)
 
     # init loop vars
     min_dist = np.inf
@@ -65,11 +65,10 @@ def nodal_crossing(orbit1, orbit2, dt=1):
     for i in range(int(orbit1.period / dt)):
         t = dt*i
         # initialize propagator
-        prop1 = Propagate(orbit1, t)
+        prop1 = Propagate(t, Orbit=orbit1)
         rNew, vNew = prop1.lagrange_coeff()
 
-        u_node = node_vect / np.linalg.norm(node_vect)
-        proj = u_node * np.dot(u_node, rNew)
+        proj = node_unit_vect * np.dot(node_unit_vect, rNew)
         dist = np.linalg.norm(rNew - proj)
         if dist < min_dist:
             min_dist = dist

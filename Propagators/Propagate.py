@@ -4,10 +4,13 @@ import matplotlib.pyplot as plt
 from MathHelpers.constants import muE
 from MathHelpers.solve_universal_anomaly import solve_universal_anomaly
 from MathHelpers.stumpff import stumpffC, stumpffS
+from mpl_toolkits.mplot3d import Axes3D
 
 class Propagate:
-    def __init__(self, Orbit, prop_time, thrust=0, burnTime = None, Isp = None, mass=None, rtol = 1e-8, atol = 1e-8, mu=muE, verbose=False):
+    def __init__(self, prop_time, Orbit=None, r=None, v=None, thrust=0, burnTime = None, Isp = None, mass=None, rtol = 1e-8, atol = 1e-8, mu=muE, verbose=False):
         self.Orbit = Orbit # orbit object
+        self.r = r
+        self.v = v
         self.prop_time = prop_time
         self.mu = mu
         self.thrust = thrust
@@ -31,8 +34,12 @@ class Propagate:
             Ir, v, Solution
         '''
         m0 = self.mass
-        r0 = self.Orbit.r
-        v0 = self.Orbit.v
+        if self.r is None and self.v is None and self.Orbit is not None:
+            r0 = self.Orbit.r
+            v0 = self.Orbit.v
+        elif self.r is not None and self.v is not None and self.Orbit is None:
+            r0 = self.r
+            v0 = self.v
         rtol = self.rtol
         atol = self.atol
         tspan = [0, self.prop_time]
@@ -48,36 +55,38 @@ class Propagate:
 
         solution = solve_ivp(ivp_wrapper, tspan, state, rtol=rtol, atol=atol)
         
+        if plot:
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection='3d')
 
-        if plot == True:
-            # create figure
-            fig=plt.figure(1)
-            ax = fig.add_subplot(111,projection='3d')
-            ax.plot3D(solution.y[0],solution.y[1],solution.y[2])
-            ax.scatter(solution.y[0][0], solution.y[1][0], solution.y[2][0], color='green', s=50, label='Start')
-            ax.scatter(solution.y[0][-1], solution.y[1][-1], solution.y[2][-1], color='red', s=50, label='End')
-            
-            # legend
-            ax.legend(loc='best', ncol=1)
+            x, y, z = solution.y[0], solution.y[1], solution.y[2]
+            ax.plot(x, y, z, linewidth=1.5)
+            ax.scatter(x[0],  y[0],  z[0],  s=50)  # start
+            ax.scatter(x[-1], y[-1], z[-1], s=50)  # end
 
-            # labels
             ax.set_xlabel('X (km)')
             ax.set_ylabel('Y (km)')
             ax.set_zlabel('Z (km)')
-            plt.title('Orbit Propagation Using solve_ivp()')
+            ax.set_title('Orbit Propagation')
+            ax.set_box_aspect([1, 1, 1]) 
+            plt.close()
 
-            # show plot
-            plt.show()
-
+    
         y = solution.y
 
         r = y[:3, -1] # [x_f, y_f, z_f]
         v = y[3:6, -1] # [vx_f, vy_f, vz_f]
 
         if self.verbose == False:
-            return r, v
+            if plot == True:
+                return r, v, fig
+            elif plot == False:
+                return r, v
         elif self.verbose == True:
-            return r, v, solution
+            if plot == True:
+                return r, v, solution, fig
+            elif plot == False:
+                return r, v, solution
 
 
 
@@ -87,9 +96,14 @@ class Propagate:
         Returns r1, v1, f, g, fdot, gdot
         doesn't support thrust
         '''
+        if self.Orbit is None and self.r is not None and self.v is not None:
+            r0 = self.r
+            v0 = self.v
+        if self.Orbit is not None and self.r is None and self.v is None:
+            r0 = self.Orbit.r
+            v0 = self.Orbit.v
         dt = self.prop_time
-        r0 = self.Orbit.r
-        v0 = self.Orbit.v
+        
         mu = self.mu
         chi = solve_universal_anomaly(dt, r0, v0)
     

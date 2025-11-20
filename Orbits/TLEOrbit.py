@@ -1,7 +1,9 @@
 import numpy as np
 from Orbits.fetch_tle import fetch_tle
-from MathHelpers.constants import muE, dayInSecs
+from MathHelpers.constants import muE, JDaysInSecs
 from MathHelpers.solve_kepler import solve_kepler
+from Time.conversions import dateTime_to_JDays, AbsJDay_to_J2000JDay
+import copy as _copy
 
 class TLEOrbit:
     def __init__(self, NORAD_ID, mu=muE):
@@ -55,11 +57,17 @@ class TLEOrbit:
         ''''
         Get hmag and ta to round out full COE set from TLEs
         '''
-        n_rad = self.n_rev_day * 2 * np.pi / dayInSecs
+        n_rad = self.n_rev_day * 2 * np.pi / JDaysInSecs
         self.sma = (self.mu / n_rad**2)**(1/3)
         self.hmag = np.sqrt(self.mu * self.sma * (1 - self.ecc**2))
         EA = solve_kepler(self.MA, self.ecc)
         self.TA = 2 * np.atan2(np.sqrt((1+self.ecc) / (1-self.ecc)), 1/np.tan(EA/2))
+        # julian days since J2000
+        y2 = int(self.epoch_year) # 2-digit TLE year
+        year_full = (2000 + y2) if (0 <= y2 <= 56) else (1900 + y2)  # TLE convention
+        _, _, JD_jan1 = dateTime_to_JDays(year_full, 1, 1, 0, 0, 0)  # abs JD at 0h UT Jan 1
+        JD_abs = JD_jan1 + (float(self.epoch_doy) - 1.0)             # add (DOY - 1), DOY may be fractional
+        self.JDsJ2000 = AbsJDay_to_J2000JDay(JD_abs)                 # assign JD since J2000.0 to self
 
     
     def state_to_coes(self):
@@ -184,3 +192,7 @@ class TLEOrbit:
         self.coes_to_state()
         # get full set of helpful orbital elements
         self.state_to_coes()
+
+    def copy(self):
+        """Return a copy of this orbit object"""
+        return _copy.deepcopy(self)
