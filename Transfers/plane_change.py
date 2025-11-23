@@ -16,7 +16,9 @@ def raan_change(orbit1, orbit2):
 
 
 def inc_change(orbit1, orbit2, dt=1, mu=muE):
-    intersectionPos, intersectionVel, intersectionTime = best_nodal_crossing(orbit1, orbit2)
+    print('BROKEN RIGHT NOW')
+    #broken call, fix
+    ##intersectionPos, intersectionVel, intersectionTime = nodal_crossings_array(orbit1, orbit2)
     
     # inc dV
     TA1 = orbit1.TA
@@ -48,7 +50,7 @@ def nodal_crossings_array(orbit1, orbit2, dt_sample=1.0, tol=1e-8, max_refine=50
     h1_hat = orbit1.hvec / np.linalg.norm(orbit1.hvec)
     h2_hat = orbit2.hvec / np.linalg.norm(orbit2.hvec)
     if np.linalg.norm(np.cross(h1_hat, h2_hat)) < 1e-12:
-        raise ValueError("Planes nearly coplanar — nodal crossings undefined.")
+        raise ValueError("Planes nearly coplanar, nodal crossings undefined.")
 
     rows = []
 
@@ -93,7 +95,7 @@ def nodal_crossings_array(orbit1, orbit2, dt_sample=1.0, tol=1e-8, max_refine=50
             t += dt_sample
 
         if len(roots) < 2:
-            raise RuntimeError("Did not find two nodal crossings; adjust dt_sample/tol.")
+            raise RuntimeError("Did not find two nodal crossings :(")
 
         roots.sort(key=lambda x: x[0])
         rows.append([orb, roots[0][1], roots[0][2], roots[0][0]])

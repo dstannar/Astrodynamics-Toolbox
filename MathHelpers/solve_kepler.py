@@ -1,7 +1,7 @@
 import numpy as np
 
 def solve_kepler(Me, ecc):
-    tol = 1e-10
+    tol = 1e-12
     max_iter = 30
     ratio = 1
     iters = 0

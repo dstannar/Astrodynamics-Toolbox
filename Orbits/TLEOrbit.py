@@ -61,7 +61,8 @@ class TLEOrbit:
         self.sma = (self.mu / n_rad**2)**(1/3)
         self.hmag = np.sqrt(self.mu * self.sma * (1 - self.ecc**2))
         EA = solve_kepler(self.MA, self.ecc)
-        self.TA = 2 * np.atan2(np.sqrt((1+self.ecc) / (1-self.ecc)), 1/np.tan(EA/2))
+        self.TA = 2*np.arctan2(np.sqrt(1+self.ecc)*np.sin(EA/2),
+                       np.sqrt(1-self.ecc)*np.cos(EA/2)) % (2*np.pi)
         # julian days since J2000
         y2 = int(self.epoch_year) # 2-digit TLE year
         year_full = (2000 + y2) if (0 <= y2 <= 56) else (1900 + y2)  # TLE convention
@@ -115,8 +116,9 @@ class TLEOrbit:
         a = 0.5*(r_per+r_apo) # semi major axis, km
         To = 2*np.pi / np.sqrt(mu) * a**(3/2) # period, seconds
         energy = vmag**2 / 2 - (mu/rmag) #specific energy, km^2/s^2
-        ea = np.arctan(np.sqrt((1-ecc)/(1+ecc))*np.tan(ta/2))*2 #eccentric anomaly, radians
-        ma = ea - ecc*np.sin(ea)
+        ea = 2*np.arctan2(np.sqrt(1-ecc)*np.sin(ta/2),np.sqrt(1+ecc)*np.cos(ta/2)) #eccentric anomaly, radians
+        ea = ea % (2*np.pi)
+        ma = (ea - ecc*np.sin(ea)) % (2*np.pi)
 
         # assign to self
         self.hmag = hmag
