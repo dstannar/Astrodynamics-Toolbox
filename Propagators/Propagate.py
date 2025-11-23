@@ -64,6 +64,7 @@ class Propagate:
             ax.scatter(x[0],  y[0],  z[0],  s=50)  # start
             ax.scatter(x[-1], y[-1], z[-1], s=50)  # end
 
+
             ax.set_xlabel('X (km)')
             ax.set_ylabel('Y (km)')
             ax.set_zlabel('Z (km)')

@@ -7,7 +7,7 @@ import requests
 from typing import Tuple, Iterable, Optional, Dict, List
 
 '''
-I will admit that chatgpt was used in creation of this file as my web scraping skills need some work. i will fix it soon!
+chatgpt was used in partial creation of this file as my web scraping skills need some work. i will fix it soon!
 
 '''
 

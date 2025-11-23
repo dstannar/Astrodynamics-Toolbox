@@ -2,41 +2,6 @@ import numpy as np
 from MathHelpers.constants import muE
 from Propagators.Propagate import Propagate
 
-def raan_change(orbit1, orbit2):
-    '''
-    Input: 2 orbit like objects (TLEOrbit, KeplerianOrbit)
-    Output:
-        burn_loc: position vector of burn
-        burn_vect: deltaV velocity vector
-        burn_time: time of burn, measured since passed orbit1 TA
-        dVmag: delta V magnitude (burn cost)
-    '''
-
-    print('not yet implemented')
-
-
-def inc_change(orbit1, orbit2, dt=1, mu=muE):
-    print('BROKEN RIGHT NOW')
-    #broken call, fix
-    ##intersectionPos, intersectionVel, intersectionTime = nodal_crossings_array(orbit1, orbit2)
-    
-    # inc dV
-    TA1 = orbit1.TA
-    FPA1 = np.atan2(orbit1.ecc*np.sin(TA1), (1 + orbit1.ecc*np.cos(TA1)))
-    
-    # Vallado alg 39
-    dInc = orbit2.inc - orbit1.inc
-    dv_vect = 2 * intersectionVel * np.cos(FPA1) * np.sin(dInc / 2)
-
-    burn_loc = intersectionPos
-    burn_time = intersectionTime
-    v_init = intersectionVel
-
-    return burn_loc, burn_time, v_init, dv_vect
-   
-
-
-
 def nodal_crossings_array(orbit1, orbit2, dt_sample=1.0, tol=1e-8, max_refine=50):
     """
     Returns:
@@ -102,3 +67,38 @@ def nodal_crossings_array(orbit1, orbit2, dt_sample=1.0, tol=1e-8, max_refine=50
         rows.append([orb, roots[1][1], roots[1][2], roots[1][0]])
 
     return rows
+
+# BELOW IS BROKEN, DO NOT CALL
+
+def raan_change(orbit1, orbit2):
+    '''
+    Input: 2 orbit like objects (TLEOrbit, KeplerianOrbit)
+    Output:
+        burn_loc: position vector of burn
+        burn_vect: deltaV velocity vector
+        burn_time: time of burn, measured since passed orbit1 TA
+        dVmag: delta V magnitude (burn cost)
+    '''
+
+    print('not yet implemented')
+
+
+def inc_change(orbit1, orbit2, dt=1, mu=muE):
+    print('BROKEN RIGHT NOW')
+    #broken call, fix
+    ##intersectionPos, intersectionVel, intersectionTime = nodal_crossings_array(orbit1, orbit2)
+    
+    # inc dV
+    TA1 = orbit1.TA
+    FPA1 = np.atan2(orbit1.ecc*np.sin(TA1), (1 + orbit1.ecc*np.cos(TA1)))
+    
+    # Vallado alg 39
+    dInc = orbit2.inc - orbit1.inc
+    dv_vect = 2 * intersectionVel * np.cos(FPA1) * np.sin(dInc / 2)
+
+    burn_loc = intersectionPos
+    burn_time = intersectionTime
+    v_init = intersectionVel
+
+    return burn_loc, burn_time, v_init, dv_vect
+   
