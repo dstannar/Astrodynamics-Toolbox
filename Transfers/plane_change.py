@@ -33,50 +33,70 @@ def inc_change(orbit1, orbit2, dt=1, mu=muE):
     return burn_loc, burn_time, v_init, dv_vect
    
 
-def plane_change(orbit1, orbit2):
-    
-    intersectionPos, intersectionVel, intersectionTime = best_nodal_crossing(orbit1, orbit2)
-
-    
 
 
-    burn_loc = intersectionPos
-    burn_time = intersectionTime
+def nodal_crossings_array(orbit1, orbit2, dt_sample=1.0, tol=1e-8, max_refine=50):
+    """
+    Returns:
+      [
+        [orbit1, posCross1, velCross1, timeCross1],
+        [orbit1, posCross2, velCross2, timeCross2],
+        [orbit2, posCross1, velCross1, timeCross1],
+        [orbit2, posCross2, velCross2, timeCross2],
+      ]
+    """
+    h1_hat = orbit1.hvec / np.linalg.norm(orbit1.hvec)
+    h2_hat = orbit2.hvec / np.linalg.norm(orbit2.hvec)
+    if np.linalg.norm(np.cross(h1_hat, h2_hat)) < 1e-12:
+        raise ValueError("Planes nearly coplanar — nodal crossings undefined.")
 
-    return burn_loc, burn_time, dVmag
+    rows = []
 
-def best_nodal_crossing(orbit1, orbit2, dt=1):
-    '''
-    gets nodal crossing point
-    
-    '''
-    # ang mom. vecs from orbit objects
-    hvec1 = orbit1.hvec
-    hvec2 = orbit2.hvec
+    for (orb, plane_hhat) in ((orbit1, h2_hat), (orbit2, h1_hat)):
+        T = orb.period
+        roots = []
 
-    # get shared node line
-    node_vect = np.cross(hvec1, hvec2)
-    node_unit_vect = node_vect / np.linalg.norm(node_vect)
+        # initial sample
+        t_prev = 0.0
+        r_prev, v_prev = Propagate(0.0, Orbit=orb).lagrange_coeff()
+        s_prev = float(np.dot(plane_hhat, r_prev))
+        
 
-    # init loop vars
-    min_dist = np.inf
-    intersectionVel = np.inf
-    intersectionPos = None
-    for i in range(int(orbit1.period / dt)):
-        t = dt*i
-        # initialize propagator
-        prop1 = Propagate(t, Orbit=orbit1)
-        rNew, vNew = prop1.lagrange_coeff()
+        t = dt_sample
+        while t <= T + 1e-12 and len(roots) < 2:
+            r_cur, v_cur = Propagate(t, Orbit=orb).lagrange_coeff()
+            s_cur = float(np.dot(plane_hhat, r_cur))
 
-        proj = node_unit_vect * np.dot(node_unit_vect, rNew)
-        dist = np.linalg.norm(rNew - proj)
-        if dist < min_dist:
-            min_dist = dist
-            intersectionPos = rNew
-            intersectionVel = vNew
-            intersectionTime = t # intersection time measured from orbit1 TA state as passed
+            if abs(s_cur) < tol:
+                roots.append((t, r_cur, v_cur))
 
-    if intersectionPos is None:
-        raise RuntimeError('No intersection of orbits')
-    else:
-        return intersectionPos, intersectionVel, intersectionTime
+            elif s_prev * s_cur < 0.0:
+                a, b, sa, sb = t - dt_sample, t, s_prev, s_cur
+                r_m = v_m = None
+                for _ in range(max_refine):
+                    m = 0.5 * (a + b)
+                    r_m, v_m = Propagate(m, Orbit=orb).lagrange_coeff()
+                    sm = float(np.dot(plane_hhat, r_m))
+                    if abs(sm) < tol:
+                        a = b = m
+                        break
+                    if sa * sm <= 0.0:
+                        b, sb = m, sm
+                    else:
+                        a, sa = m, sm
+                t_root = 0.5 * (a + b)
+                if r_m is None:
+                    r_m, v_m = Propagate(t_root, Orbit=orb).lagrange_coeff()
+                roots.append((t_root, r_m, v_m))
+
+            t_prev, s_prev = t, s_cur
+            t += dt_sample
+
+        if len(roots) < 2:
+            raise RuntimeError("Did not find two nodal crossings; adjust dt_sample/tol.")
+
+        roots.sort(key=lambda x: x[0])
+        rows.append([orb, roots[0][1], roots[0][2], roots[0][0]])
+        rows.append([orb, roots[1][1], roots[1][2], roots[1][0]])
+
+    return rows

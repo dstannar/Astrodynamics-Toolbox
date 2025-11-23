@@ -133,6 +133,12 @@ class TLEOrbit:
         self.EA = ea
         self.MA = ma
         self.hvec = h
+        self.v_r = v_r
+        self.v_t = hmag / rmag
+        self.FPA = np.atan2(self.v_r, self.v_t)
+        self.vmag = vmag
+        self.rmag = rmag
+        self.eccvec = evec
 
     def coes_to_state(self):
         hmag = self.hmag

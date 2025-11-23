@@ -66,4 +66,4 @@ def phasing_maneuver(ra, rp, TA1, TA2, delta_apse=0, mu=muE):
     # symmetric maneuver
     dv2 = dv1
     dv_total = dv1 + dv2
-    return dv_total
+    return dv1, dv2
