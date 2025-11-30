@@ -129,13 +129,3 @@ class KeplerianOrbit:
         self.v = vnew
         # get COEs
         self.state_to_coes()
-        # None out TLEs that are no longer accurate
-        self.epoch_year  = None
-        self.epoch_doy   = None
-        self.ndot        = None
-        self.nddot       = None
-        self.bstar       = None
-        self.elset_type  = None
-        self.elset_num   = None
-        self.n_rev_day   = None
-        self.rev_num     = None

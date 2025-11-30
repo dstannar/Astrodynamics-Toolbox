@@ -350,8 +350,8 @@ def _fallback_query_gp_latest_combined(session: requests.Session, norad_ids: Ite
 def fetch_tle(
     norad_id: int,
     # Keep your hard-coded credentials in the defaults
-    identity: str = 'dstannar@calpoly.edu',
-    password: str = 'sxiAzkbs8M-jPQg',
+    identity: str,
+    password: str,
     cache_dir: str = CACHE_DIR_TLE,
 ) -> Tuple[Optional[str], str, str]:
     """
