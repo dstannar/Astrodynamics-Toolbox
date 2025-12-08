@@ -106,7 +106,7 @@ class Propagate:
         dt = self.prop_time
         
         mu = self.mu
-        chi = solve_universal_anomaly(dt, r0, v0)
+        chi = solve_universal_anomaly(dt, r0, v0, mu=self.mu)
     
         r0mag = np.linalg.norm(r0)
         v0mag = np.linalg.norm(v0)

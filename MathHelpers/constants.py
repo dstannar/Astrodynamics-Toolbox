@@ -7,8 +7,8 @@ yearInDays = 365.256 #days
 JDaysInSecs = 86400 # seconds per Julian day
 JD_J2000 = 2451545.0 # JD at J2000.0 (2000-01-01 12:00:00)
 
-# Planet + Moon data from Curtis Table A.1 (km, kg, days/years)
-# Units are kept exactly as in the table so you can always trace back.
+# Planet + Moon data from Curtis Table A.1
+# Units are kept exactly as in the table
 
 MercuryData = {
     "radius_km": 2440.0,
@@ -19,6 +19,7 @@ MercuryData = {
     "orbit_ecc": 0.2056,
     "orbit_inclination_deg": 7.00,
     "orbit_sidereal_period": {"value": 87.97, "unit": "d"},
+    "mu": 22032
 }
 
 VenusData = {
@@ -30,6 +31,7 @@ VenusData = {
     "orbit_ecc": 0.0067,
     "orbit_inclination_deg": 3.39,
     "orbit_sidereal_period": {"value": 224.7, "unit": "d"},
+    "mu": 324859
 }
 
 EarthData = {
@@ -41,6 +43,7 @@ EarthData = {
     "orbit_ecc": 0.0167,
     "orbit_inclination_deg": 0.0,
     "orbit_sidereal_period": {"value": 365.256, "unit": "d"},
+    "mu": muE
 }
 
 MoonData = {
@@ -52,6 +55,7 @@ MoonData = {
     "orbit_ecc": 0.0549,
     "orbit_inclination_deg": 5.145,
     "orbit_sidereal_period": {"value": 27.322, "unit": "d"},
+    "mu": 4905
 }
 
 MarsData = {
@@ -63,6 +67,7 @@ MarsData = {
     "orbit_ecc": 0.0935,
     "orbit_inclination_deg": 1.850,
     "orbit_sidereal_period": {"value": 1.881, "unit": "y"},
+    "mu": 42828
 }
 
 JupiterData = {
@@ -74,6 +79,7 @@ JupiterData = {
     "orbit_ecc": 0.0489,
     "orbit_inclination_deg": 1.304,
     "orbit_sidereal_period": {"value": 11.86, "unit": "y"},
+    "mu": 126686534
 }
 
 SaturnData = {
@@ -85,6 +91,7 @@ SaturnData = {
     "orbit_ecc": 0.0565,
     "orbit_inclination_deg": 2.485,
     "orbit_sidereal_period": {"value": 29.46, "unit": "y"},
+    "mu": 37931187
 }
 
 UranusData = {
@@ -96,6 +103,7 @@ UranusData = {
     "orbit_ecc": 0.0457,
     "orbit_inclination_deg": 0.772,
     "orbit_sidereal_period": {"value": 84.01, "unit": "y"},
+    "mu": 5793939
 }
 
 NeptuneData = {
@@ -107,6 +115,7 @@ NeptuneData = {
     "orbit_ecc": 0.0113,
     "orbit_inclination_deg": 1.769,
     "orbit_sidereal_period": {"value": 164.8, "unit": "y"},
+    "mu":6836529
 }
 
 PlutoData = {
@@ -118,6 +127,7 @@ PlutoData = {
     "orbit_ecc": 0.2488,
     "orbit_inclination_deg": 17.16,
     "orbit_sidereal_period": {"value": 247.9, "unit": "y"},
+    "mu": 871
 }
 
 PlanetData = {

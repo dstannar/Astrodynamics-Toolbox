@@ -26,5 +26,7 @@ def format_time(sec):
         return sec / 60, 'minutes'
     elif sec / 60 / 60 / 24 < 1:
         return sec / 60 / 60, 'hours'
-    else:
+    elif sec / 60 / 60 / 24 / 356.25 < 1:
         return sec / 60 / 60 / 24, 'days'
+    else:
+        return sec / 60 / 60 / 24 / 365.25, 'years'
