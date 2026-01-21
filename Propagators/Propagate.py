@@ -132,8 +132,7 @@ class Propagate:
         elif self.verbose == False:
             return r1, v1
 
-    @staticmethod
-    def twobodymotion(t, y, thrust, burnTime, Isp, MU = muE):
+    def twobodymotion(self, t, y, thrust, burnTime, Isp):
         '''
         Returns derivative of state variables
         supports thrust
@@ -146,6 +145,7 @@ class Propagate:
         '''
         state = y
         time = t
+        MU = self.mu
 
         if len(state) == 7:
             x, y, z, vx, vy, vz, m = state

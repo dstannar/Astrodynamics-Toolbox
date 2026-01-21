@@ -4,6 +4,54 @@ AU_KM = 149597870.0  # km per astronomical unit
 
 # FROM DR. ABERCROMBY OF CAL POLY
 
+from MathHelpers.solve_kepler import solve_kepler
+from Orbits.KeplerianOrbit import KeplerianOrbit
+from MathHelpers.constants import muS, JD_J2000  # Sun mu, and JD at J2000.0
+
+def planetary_elements(planet_id: int, JD: float):
+    """
+    Return heliocentric planet state (r, v) at given Julian Date using Meeus-style elements.
+
+    Parameters
+    ----------
+    planet_id : int
+        1=Mercury ... 8=Neptune (3=Earth, 4=Mars, etc.)
+    JD : float
+        Julian date (days)
+
+    Returns
+    -------
+    r : np.ndarray (3,)
+        Heliocentric position [km]
+    v : np.ndarray (3,)
+        Heliocentric velocity [km/s]
+    """
+    # Julian centuries from J2000.0
+    T = (JD - JD_J2000) / 36525.0
+
+    # Meeus elements (a in km; angles in deg)
+    a_km, ecc, inc_deg, raan_deg, w_hat_deg, L_deg = planetary_elements2(planet_id, T)
+
+    deg2rad = np.pi / 180.0
+    inc  = inc_deg  * deg2rad
+    raan = raan_deg * deg2rad
+    wbar = w_hat_deg * deg2rad
+    L    = L_deg    * deg2rad
+    argp = (wbar - raan)
+    M = (L - wbar) % (2.0 * np.pi)
+    E = solve_kepler(M, ecc)
+    nu = 2.0 * np.arctan2(
+        np.sqrt(1.0 + ecc) * np.sin(E / 2.0),
+        np.sqrt(1.0 - ecc) * np.cos(E / 2.0),
+    ) % (2.0 * np.pi)
+
+    hmag = np.sqrt(muS * a_km * (1.0 - ecc**2))
+
+    # Build orbit and read out r,v
+    orb = KeplerianOrbit(hmag=hmag, ecc=ecc, ta=nu, raan=raan, inc=inc, argp=argp, mu=muS)
+    return orb.r, orb.v
+
+
 
 def planetary_elements2(planet_id: int, T: float):
     """

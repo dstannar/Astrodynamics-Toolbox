@@ -113,7 +113,7 @@ def ch8_16():
     T_dep = (JD_dep - JD_J2000) / 36525.0
     T_arr = (JD_arr - JD_J2000) / 36525.0
 
-    # planetary osculating elements from planetary_elements2 (Meeus)
+    # planetary  elements from planetary_elements2 (Meeus)
     # coes = [a_km, ecc, inc_deg, raan_deg, w_hat_deg, L_deg]
     aE, eE, incE_deg, raanE_deg, w_hatE_deg, L_E_deg = planetary_elements2(3, T_dep)
     aM, eM, incM_deg, raanM_deg, w_hatM_deg, L_M_deg = planetary_elements2(4, T_arr)
