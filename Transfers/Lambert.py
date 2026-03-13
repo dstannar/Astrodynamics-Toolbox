@@ -3,18 +3,14 @@ from MathHelpers.constants import muE
 from MathHelpers.stumpff import stumpffC, stumpffS
 
 class Lambert:
-    def __init__(self, r0, r1, tof, mu=muE, nrev=0, shortWay=True, verbose=False):
+    def __init__(self, mu=muE, nrev=0, verbose=False):
         # assign to self
-        self.r0 = r0
-        self.r1 = r1
-        self.tof = tof
-        self.nrev = nrev
-        self.shortWay = shortWay
+        self.nrev = nrev # multi rev not yet implemented
         self.mu = mu
         self.verbose = verbose
 
-    def robust_solve(self):
-        v1, v2, exitFlag = self.solve_lambertUV()
+    def robust_solve(self, r0, r1, tof, shortWay=True):
+        v1, v2, exitFlag = self.solve_lambertUV(r0, r1, tof, shortWay=shortWay)
         if exitFlag == 1:
             self.v1 = v1
             self.v2 = v2
@@ -25,17 +21,15 @@ class Lambert:
                 print('failed to solve')
             return np.full(3, np.nan), np.full(3, np.nan), -1
 
-    def solve_lambertUV(self):
+    def solve_lambertUV(self, r0, r1, tof, shortWay=True):
         mu = self.mu
-        r1_vect = self.r0
-        r2_vect = self.r1
-        shortWay = self.shortWay
-        tof = self.tof
-        r1 = np.linalg.norm(r1_vect)
-        r2 = np.linalg.norm(r2_vect)
+        r1_vect = r0
+        r2_vect = r1
+        r1mag = np.linalg.norm(r1_vect)
+        r2mag = np.linalg.norm(r2_vect)
         badSolve = False # optimism!
 
-        cos_dT = np.dot(r1_vect, r2_vect) / (r1 * r2)
+        cos_dT = np.dot(r1_vect, r2_vect) / (r1mag * r2mag)
         dTheta = np.arccos(cos_dT)   
         
         rcross = np.cross(r1_vect, r2_vect)
@@ -47,7 +41,7 @@ class Lambert:
         if shortWay == False:
             tm = -1          
 
-        A = tm * np.sqrt(r1 * r2 * (1 + cos_dT))
+        A = tm * np.sqrt(r1mag * r2mag * (1 + cos_dT))
 
         # Check A for solvibility
         if A == 0:
@@ -67,7 +61,7 @@ class Lambert:
         C = 1/2
         S = 1/6
 
-        y = r1 + r2 + A * (z * S - 1) / np.sqrt(C) 
+        y = r1mag + r2mag + A * (z * S - 1) / np.sqrt(C) 
         x = np.sqrt(y / C)           
         dt_loop = x**3 * S / np.sqrt(mu) + A * np.sqrt(y) / np.sqrt(mu)
         # iterate on universal variable z with bisection method
@@ -83,7 +77,7 @@ class Lambert:
             if C == 0:
                 break
 
-            y = r1 + r2 + A * (z * S - 1) / np.sqrt(C)
+            y = r1mag + r2mag + A * (z * S - 1) / np.sqrt(C)
             if y < 0:
                 z = (z_upper + z_lower) / 2
             
@@ -104,14 +98,14 @@ class Lambert:
         S = stumpffS(z)
 
         # use universal variable z to get x, y
-        y = r1 + r2 + A * (z * S - 1) / np.sqrt(C)
+        y = r1mag + r2mag + A * (z * S - 1) / np.sqrt(C)
         x = np.sqrt(y / C)
 
         # lagrange coeff
-        f = 1 - (x**2 / r1) * C
+        f = 1 - (x**2 / r1mag) * C
         g = tof - (x**3 / np.sqrt(mu)) * S
-        fdot = np.sqrt(mu) / (r1 * r2) * x * (z * S - 1)
-        gdot = 1 - (x**2 / r2) * C
+        fdot = np.sqrt(mu) / (r1mag * r2mag) * x * (z * S - 1)
+        gdot = 1 - (x**2 / r2mag) * C
 
         # velo vectors from lagrange coeff
         v1_vect = (r2_vect - f * r1_vect) / g

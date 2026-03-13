@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astrodynamics-toolbox"
+version = "0.1.0"
+description = "Astrodynamics utilities and mission design tools."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.20",
+    "scipy>=1.8",
+    "matplotlib>=3.5",
+    "requests>=2.0",
+    "pygad>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "jupyter",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["MathHelpers*", "Orbits*", "Propagators*", "Transfers*", "Time*"]
+exclude = ["Scripts*", "Examples*", "Optimization*", "cache*", "__pycache__*"]

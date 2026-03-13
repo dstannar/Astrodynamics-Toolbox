@@ -1,44 +1,37 @@
+import csv
+import json
 import os
 import time
-import json
-import random
-import csv
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
+
 import requests
-from typing import Tuple, Iterable, Optional, Dict, List
-
-'''
-chatgpt was used in partial creation of this file as my web scraping skills need some work. i will fix it soon!
-
-'''
 
 # ===========================
-# Configuration
+# Configuration (Space-Track bulk GP + cache + rate limiting)
 # ===========================
 ST_BASE = "https://www.space-track.org"
 ST_LOGIN_URL = f"{ST_BASE}/ajaxauth/login"
-ST_LOGOUT_URL = f"{ST_BASE}/ajaxauth/logout"
 ST_QUERY_BASE = f"{ST_BASE}/basicspacedata/query"
 
-# Identify yourself politely (add a real contact email).
 USER_AGENT = os.getenv("SPACETRACK_USER_AGENT", "dstannar@calpoly.edu")
 
-# Cache settings
+# Keep the externally-facing defaults unchanged.
 CACHE_DIR_TLE = "cache/tle_spacetrack"
-GLOBAL_3LE_CACHE = os.path.join(CACHE_DIR_TLE, "gp_now3_3le.txt")
-GLOBAL_3LE_INDEX = os.path.join(CACHE_DIR_TLE, "gp_now3_index.json")
-FALLBACK_QUOTA_FILE = os.path.join(CACHE_DIR_TLE, "fallback_quota.json")
 
-# TTLs
-PER_ID_TTL_S = 12 * 3600
-GLOBAL_TTL_S = 12 * 3600
+# Space-Track guideline: do not query GP more than once per hour.
+# We keep the cache slightly longer than 1 hour so most calls are cache hits.
+_CACHE_HOURS = 2.0
 
-# HTTP behavior
-REQUEST_TIMEOUT = (5, 30)   # (connect, read) seconds
-POLITE_DELAY_S = 1.1        # ~1 req/sec
-MAX_RETRIES = 3             # gentle backoff for transient errors
-BACKOFF_BASE = 1.7
+_MAX_REQUESTS_PER_MINUTE = 30
+_MAX_REQUESTS_PER_HOUR = 300
 
-# satcat CSV locations (first existing wins)
+# Persisted API attempt log (shared across scripts in this repo).
+# Put it in the repo root (../ from Orbits/).
+_RATE_STATE_FILE = Path(__file__).resolve().parents[1] / ".spacetrack_rate_state.json"
+
+# satcat CSV locations (first existing wins) for optional name adornment
 _SATCAT_CANDIDATES = [
     os.path.join("Orbits", "satcat.csv"),
     os.getenv("SATCAT_CSV") or "",
@@ -49,7 +42,6 @@ _SATCAT_CANDIDATES = [
     "satcat.csv",
 ]
 
-# In-memory satcat cache
 _SATCAT_ROWS: Optional[Dict[int, Dict[str, str]]] = None
 _SATCAT_MTIME: Optional[float] = None
 _SATCAT_PATH: Optional[str] = None
@@ -74,21 +66,6 @@ class SpaceTrackNoTLEError(RuntimeError):
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
-def _cache_read_lines(path: str, ttl_s: float) -> Optional[List[str]]:
-    if ttl_s <= 0 or not os.path.exists(path):
-        return None
-    age = time.time() - os.path.getmtime(path)
-    if age > ttl_s:
-        return None
-    with open(path, "r", encoding="utf-8") as f:
-        return [ln.rstrip("\n") for ln in f]
-
-def _cache_write_lines(path: str, lines: Iterable[str]) -> None:
-    _ensure_dir(os.path.dirname(path))
-    with open(path, "w", encoding="utf-8") as f:
-        for ln in lines:
-            f.write(ln.rstrip("\n") + "\n")
-
 def _cache_read_json(path: str, ttl_s: Optional[float] = None) -> Optional[dict]:
     if not os.path.exists(path):
         return None
@@ -105,68 +82,61 @@ def _cache_write_json(path: str, obj: dict) -> None:
         json.dump(obj, f, indent=2)
 
 # ===========================
-# TLE helpers
+# Rate state helpers (persistent API attempt log)
 # ===========================
-def checksum_ok(line: str) -> bool:
-    """TLE line checksum per standard rule."""
-    if len(line) < 69 or line[0] not in ("1", "2"):
-        return False
-    s = 0
-    for ch in line[:68]:
-        if ch.isdigit():
-            s += int(ch)
-        elif ch == "-":
-            s += 1
+def _load_rate_state() -> List[datetime]:
+    if not _RATE_STATE_FILE.exists():
+        return []
+
     try:
-        return (s % 10) == int(line[68])
-    except ValueError:
-        return False
+        raw = json.loads(_RATE_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
 
-def _norad_from_l1(line1: str) -> int:
-    # TLE line 1 columns 3–7 are the 5-digit catalog number
-    return int(line1[2:7])
+    timestamps: List[datetime] = []
 
-def _iter_triplets_from_3le_text(text: str):
-    """Yield (name, L1, L2). Name may be None (absent)."""
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    i = 0
-    while i < len(lines):
-        name = None
-        if lines[i].startswith("0 "):
-            name = lines[i][2:].strip()
-            i += 1
-        if i + 1 >= len(lines):
-            break
-        l1, l2 = lines[i], lines[i + 1]
-        i += 2
-        if not (l1.startswith("1 ") and l2.startswith("2 ")):
-            continue
-        if not (checksum_ok(l1) and checksum_ok(l2)):
-            continue
-        yield name, l1, l2
+    if isinstance(raw, dict):
+        log = raw.get("request_log_utc")
+        if isinstance(log, list):
+            for ts in log:
+                if not isinstance(ts, str):
+                    continue
+                try:
+                    timestamps.append(datetime.fromisoformat(ts))
+                except Exception:
+                    continue
 
-def _index_global_3le(text: str) -> Dict[int, Tuple[Optional[str], str, str]]:
-    idx: Dict[int, Tuple[Optional[str], str, str]] = {}
-    for name, l1, l2 in _iter_triplets_from_3le_text(text):
-        try:
-            nid = _norad_from_l1(l1)
-        except Exception:
-            continue
-        # GP endpoint returns the newest elset per object already
-        idx[nid] = (name, l1, l2)
-    return idx
+        if not timestamps:
+            ts = raw.get("last_gp_query_utc")
+            if isinstance(ts, str):
+                try:
+                    timestamps.append(datetime.fromisoformat(ts))
+                except Exception:
+                    pass
 
-def _normalize_triplet(lines: List[str]) -> Tuple[Optional[str], str, str]:
-    """Normalize either [L1, L2] or [0 name, L1, L2] to (name, L1, L2)."""
-    if not lines:
-        raise ValueError("empty TLE lines")
-    if lines[0].startswith("1 "):
-        name = None
-        l1, l2 = lines[0], lines[1]
-    else:
-        name = lines[0][2:].strip() if lines[0].startswith("0 ") else lines[0]
-        l1, l2 = lines[1], lines[2]
-    return name, l1, l2
+    elif isinstance(raw, list):
+        for ts in raw:
+            if not isinstance(ts, str):
+                continue
+            try:
+                timestamps.append(datetime.fromisoformat(ts))
+            except Exception:
+                continue
+
+    return timestamps
+
+
+def _save_rate_state(request_log: List[datetime]) -> None:
+    payload = {"request_log_utc": [dt.isoformat() for dt in request_log if isinstance(dt, datetime)]}
+    try:
+        _RATE_STATE_FILE.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception as e:
+        raise RuntimeError(f"Failed to save rate state to {_RATE_STATE_FILE}: {e}") from e
+
+
+def _prune_old_requests(request_log: List[datetime], now: datetime) -> List[datetime]:
+    cutoff = now - timedelta(hours=1)
+    return [ts for ts in request_log if ts >= cutoff]
 
 # ===========================
 # satcat.csv loader (OBJECT_NAME only; this sheet has no TLE columns)
@@ -217,297 +187,287 @@ def _satcat_name(norad_id: int) -> Optional[str]:
     return name or None
 
 # ===========================
-# HTTP helpers (session + single GET)
+# Space-Track request helpers
 # ===========================
-def _sleep_with_jitter(base: float, attempt: int) -> None:
-    time.sleep((base ** attempt) + random.uniform(0, 0.25))
+def _get_credentials(identity: Optional[str], password: Optional[str]) -> Tuple[str, str]:
+    """
+    Resolve Space-Track credentials.
 
-def _st_login_session(identity: str, password: str, timeout=REQUEST_TIMEOUT) -> requests.Session:
-    s = requests.Session()
-    s.headers.update({"User-Agent": USER_AGENT})
-    time.sleep(POLITE_DELAY_S)
-    resp = s.post(ST_LOGIN_URL, data={"identity": identity, "password": password}, timeout=timeout)
-    resp.raise_for_status()
+    Priority:
+    - explicit args (identity/password) if both are non-empty
+    - environment variables SPACETRACK_USERNAME/SPACETRACK_PASSWORD
+    """
+    if identity and password:
+        return identity, password
+
+    username = os.getenv("SPACETRACK_USERNAME")
+    pw = os.getenv("SPACETRACK_PASSWORD")
+    if not username or not pw:
+        raise SpaceTrackAuthError(
+            "Space-Track credentials not found. Provide identity/password or set "
+            "SPACETRACK_USERNAME and SPACETRACK_PASSWORD environment variables."
+        )
+    return username, pw
+
+
+def _build_gp_query_url() -> str:
+    """
+    Global on-orbit, recent-EPOCH GP dataset in JSON format.
+
+    We include emptyresult/show so empty queries don't return a blank page/body.
+    """
+    # on-orbit only: decay_date/null-val
+    # recent TLEs: epoch/>now-10
+    # JSON so additional metadata is available and parsing is robust.
+    return (
+        f"{ST_QUERY_BASE}"
+        "/class/gp"
+        "/decay_date/null-val"
+        "/epoch/%3Enow-10"
+        "/orderby/EPOCH%20desc"
+        "/format/json"
+        "/emptyresult/show"
+    )
+
+
+def _http_get_spacetrack_json(url: str, username: str, password: str, timeout: float = 30.0) -> str:
+    with requests.Session() as s:
+        s.headers.update({"User-Agent": USER_AGENT})
+        login = s.post(
+            ST_LOGIN_URL,
+            data={"identity": username, "password": password},
+            timeout=timeout,
+        )
+        login.raise_for_status()
+
+        r = s.get(url, timeout=timeout)
+        r.raise_for_status()
+        return r.text
+
+# ===========================
+# Bulk GP cache (global dataset)
+# ===========================
+def _cache_file(cache_dir: Optional[str]) -> Path:
+    root = Path(cache_dir) if cache_dir is not None else (Path.home() / ".spacetrack-cache")
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "tles_gp_full.json"
+
+
+def _load_cached_gp(cache_path: Path, cache_hours: float) -> Optional[List[dict]]:
+    if not cache_path.exists():
+        return None
+
+    mtime = datetime.fromtimestamp(cache_path.stat().st_mtime, tz=timezone.utc)
+    now = datetime.now(timezone.utc)
+    age_hours = (now - mtime).total_seconds() / 3600.0
+    if age_hours > cache_hours:
+        return None
+
+    text = cache_path.read_text(encoding="utf-8")
     try:
-        j = resp.json()
-        if isinstance(j, dict) and j.get("Login") == "Failed":
-            raise SpaceTrackAuthError("Space-Track login failed: check credentials.")
-    except ValueError:
-        pass
-    return s
+        data = json.loads(text)
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse cached GP JSON from {cache_path}: {e}") from e
 
-def _st_one_gp_call(session: requests.Session, suffix: str, timeout=REQUEST_TIMEOUT) -> str:
+    if not isinstance(data, list):
+        raise RuntimeError(
+            f"Unexpected GP cache format in {cache_path}: expected list, got {type(data).__name__}"
+        )
+
+    return data
+
+
+def _save_cached_gp(cache_path: Path, records: List[dict]) -> None:
+    try:
+        cache_path.write_text(json.dumps(records), encoding="utf-8")
+    except Exception as e:
+        raise RuntimeError(f"Failed to save cached GP JSON to {cache_path}: {e}") from e
+
+
+def _index_gp_records_by_norad(records: List[dict]) -> Dict[int, dict]:
     """
-    Perform exactly ONE /class/gp/ call (with polite delay and backoff).
+    Build a NORAD_CAT_ID -> record index.
+
+    Records are assumed to be ordered by newest EPOCH first (we query with orderby/EPOCH desc),
+    so we keep the first occurrence per NORAD.
     """
-    url = f"{ST_QUERY_BASE}/{suffix.lstrip('/')}"
-    last_exc = None
-    for attempt in range(MAX_RETRIES + 1):
+    idx: Dict[int, dict] = {}
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        nid = rec.get("NORAD_CAT_ID")
         try:
-            time.sleep(POLITE_DELAY_S)
-            r = session.get(url, timeout=timeout, headers={"User-Agent": USER_AGENT})
-            if r.status_code == 429:
-                last_exc = SpaceTrackRateLimitError("HTTP 429 Too Many Requests")
-                _sleep_with_jitter(BACKOFF_BASE, attempt + 1)
-                continue
-            r.raise_for_status()
-            text = r.text.strip()
-            if text.startswith("{") and '"Login":"Failed"' in text:
-                raise SpaceTrackAuthError("Space-Track session expired.")
-            return text
-        except (requests.HTTPError, requests.ConnectionError, requests.Timeout) as e:
-            last_exc = e
-            code = getattr(getattr(e, "response", None), "status_code", None)
-            if code and 400 <= code < 500 and code != 429:
-                if attempt >= 1:
-                    break
-            _sleep_with_jitter(BACKOFF_BASE, attempt + 1)
-    if isinstance(last_exc, Exception):
-        raise last_exc
-    raise RuntimeError("Unknown Space-Track request failure")
-
-# ===========================
-# Global (12h) pull – ONE gp call when stale
-# ===========================
-def _refresh_global_now3(session: requests.Session) -> Dict[int, Tuple[Optional[str], str, str]]:
-    """
-    Recommended endpoint: newest propagable element sets for all on-orbit objects.
-    /class/gp/decay_date/null-val/epoch/>now-3/format/3le
-    """
-    suffix = "class/gp/decay_date/null-val/epoch/%3Enow-3/format/3le"
-    text = _st_one_gp_call(session, suffix)  # **one** /class/gp call
-    _cache_write_lines(GLOBAL_3LE_CACHE, text.splitlines())
-    idx = _index_global_3le(text)
-    _cache_write_json(GLOBAL_3LE_INDEX, {str(k): v for k, v in idx.items()})
+            nid_i = int(nid)
+        except Exception:
+            continue
+        if nid_i not in idx:
+            idx[nid_i] = rec
     return idx
-
-def _load_global_index(ttl_s: float = GLOBAL_TTL_S) -> Optional[Dict[int, Tuple[Optional[str], str, str]]]:
-    j = _cache_read_json(GLOBAL_3LE_INDEX, ttl_s)
-    if j is not None:
-        return {int(k): tuple(v) for k, v in j.items()}
-    raw = _cache_read_lines(GLOBAL_3LE_CACHE, ttl_s)
-    if raw is not None:
-        return _index_global_3le("\n".join(raw))
-    return None
-
-# ===========================
-# Fallback quota (max 10 objects/hour)
-# ===========================
-def _fallback_quota_status(now: Optional[float] = None) -> dict:
-    """
-    Returns the current quota record, resetting if window expired.
-    Tracks objects (not HTTP calls). Max 10 objects per wall-clock hour.
-    """
-    now = now or time.time()
-    rec = _cache_read_json(FALLBACK_QUOTA_FILE, ttl_s=None) or {}
-    window_start = rec.get("window_start", 0.0)
-    used = int(rec.get("used", 0))
-    # If more than an hour has passed, reset
-    if now - float(window_start or 0.0) >= 3600:
-        rec = {"window_start": now, "used": 0}
-        _cache_write_json(FALLBACK_QUOTA_FILE, rec)
-        return rec
-    # Ensure structure persisted
-    if "window_start" not in rec:
-        rec["window_start"] = now
-    if "used" not in rec:
-        rec["used"] = 0
-    _cache_write_json(FALLBACK_QUOTA_FILE, rec)
-    return rec
-
-def _fallback_quota_take(n: int) -> int:
-    """
-    Consume up to n from the hourly quota. Returns the allowed amount (0..n).
-    """
-    rec = _fallback_quota_status()
-    used = int(rec.get("used", 0))
-    remaining = max(0, 10 - used)
-    allow = min(n, remaining)
-    if allow > 0:
-        rec["used"] = used + allow
-        _cache_write_json(FALLBACK_QUOTA_FILE, rec)
-    return allow
-
-# ===========================
-# Fallback fetch (combined, single call)
-# ===========================
-def _fallback_query_gp_latest_combined(session: requests.Session, norad_ids: Iterable[int]) -> Dict[int, Tuple[Optional[str], str, str]]:
-    """
-    Combined fallback: query gp for up to 10 IDs (comma-delimited) **once**,
-    then return newest TLE per ID. We rely on GP returning the newest elset.
-    """
-    ids = [int(n) for n in dict.fromkeys(int(n) for n in norad_ids)]  # de-dup, preserve order
-    if not ids:
-        return {}
-    id_list = ",".join(str(n) for n in ids)
-    suffix = f"class/gp/NORAD_CAT_ID/{id_list}/format/3le"
-    text = _st_one_gp_call(session, suffix)  # one HTTP GET
-    return _index_global_3le(text)
 
 # ===========================
 # Public API
 # ===========================
 def fetch_tle(
     norad_id: int,
-    # Keep your hard-coded credentials in the defaults
-    identity: str,
-    password: str,
+    identity: Optional[str] = None,
+    password: Optional[str] = None,
     cache_dir: str = CACHE_DIR_TLE,
 ) -> Tuple[Optional[str], str, str]:
     """
-    Returns newest TLE (name, L1, L2) for NORAD id, with minimal API usage.
+    Return newest TLE (name, L1, L2) for a NORAD id.
 
-    Lookup order:
-      0) satcat.csv (OBJECT_NAME only; this sheet has no TLEs) – name adornment only.
-      1) Per-ID cache (TTL 12h).
-      2) Global cache (TTL 12h) built from a single /class/gp "now-3" refresh.
-      3) If still missing, and within quota, do **one** combined fallback gp call
-         for this ID (counts toward max 10 objects/hour).
+    Internals mimic a "single bulk GP request + global cache + persistent rate-state" strategy:
+    - Uses a global cached GP JSON dataset for fast local lookup.
+    - If the cache is stale/missing, performs exactly one bulk GP request and caches it.
+    - Enforces Space-Track API limits via a shared, persisted request log file.
     """
-    # 1) Per-ID cache first (satcat only carries name; no TLE)
-    per_id_cache = os.path.join(cache_dir, f"{int(norad_id)}.tle")
-    lines = _cache_read_lines(per_id_cache, PER_ID_TTL_S)
-    if lines:
-        return _normalize_triplet(lines)
+    nid = int(norad_id)
+    cache_path = _cache_file(cache_dir)
 
-    # 2) Global cache
-    idx = _load_global_index(GLOBAL_TTL_S)
-    if idx and int(norad_id) in idx:
-        name, l1, l2 = idx[int(norad_id)]
-        # Write per-ID cache
-        if name:
-            _cache_write_lines(per_id_cache, [f"0 {name}", l1, l2])
-        else:
-            _cache_write_lines(per_id_cache, [l1, l2])
-        return name, l1, l2
+    cached_records = _load_cached_gp(cache_path, _CACHE_HOURS)
+    if cached_records is None:
+        now = datetime.now(timezone.utc)
+        request_log = _prune_old_requests(_load_rate_state(), now)
 
-    # 3) If global cache is stale/missing, refresh once
-    if idx is None:
-        sess = _st_login_session(identity, password, timeout=REQUEST_TIMEOUT)
-        idx = _refresh_global_now3(sess)  # one global /class/gp call
-        if int(norad_id) in idx:
-            name, l1, l2 = idx[int(norad_id)]
-            if name:
-                _cache_write_lines(per_id_cache, [f"0 {name}", l1, l2])
-            else:
-                _cache_write_lines(per_id_cache, [l1, l2])
-            return name, l1, l2
+        one_minute_ago = now - timedelta(minutes=1)
+        recent_minute = [ts for ts in request_log if ts >= one_minute_ago]
+        if len(recent_minute) >= _MAX_REQUESTS_PER_MINUTE:
+            raise SpaceTrackRateLimitError(
+                "Space-Track request suppressed (30/min limit). "
+                f"{len(recent_minute)} requests logged in the last 60 seconds."
+            )
 
-    # 4) Fallback path: allow exceptions (up to 10 objects/hour), combined query
-    allow = _fallback_quota_take(1)
-    if allow <= 0:
-        raise SpaceTrackNoTLEError(int(norad_id),
-            f"No TLE for NORAD {norad_id} in newest GP set and fallback quota exhausted (10/hour).")
+        if len(request_log) >= _MAX_REQUESTS_PER_HOUR:
+            raise SpaceTrackRateLimitError(
+                "Space-Track request suppressed (300/hour limit). "
+                f"{len(request_log)} requests logged in the last hour."
+            )
 
-    sess = _st_login_session(identity, password, timeout=REQUEST_TIMEOUT)
-    partial = _fallback_query_gp_latest_combined(sess, [int(norad_id)])
-    if int(norad_id) not in partial:
-        raise SpaceTrackNoTLEError(int(norad_id),
-            f"No TLE for NORAD {norad_id} available via fallback gp query.")
-    name, l1, l2 = partial[int(norad_id)]
-    if not name:
-        # adorn with satcat OBJECT_NAME if present
-        satname = _satcat_name(int(norad_id))
-        if satname:
-            name = satname
-    # write per-ID cache
-    if name:
-        _cache_write_lines(per_id_cache, [f"0 {name}", l1, l2])
-    else:
-        _cache_write_lines(per_id_cache, [l1, l2])
-    return name, l1, l2
+        if request_log:
+            last_gp = max(request_log)
+            if now - last_gp < timedelta(hours=1):
+                raise SpaceTrackRateLimitError(
+                    "Space-Track GP query suppressed (1/hour guideline). "
+                    f"Last GP query was at {last_gp.isoformat()} UTC."
+                )
+
+        request_log.append(now)
+        _save_rate_state(request_log)
+
+        username, pw = _get_credentials(identity, password)
+        url = _build_gp_query_url()
+        response_text = _http_get_spacetrack_json(url, username, pw)
+        stripped = response_text.strip()
+        if not stripped:
+            raise RuntimeError(f"Space-Track GP query returned an empty response. URL: {url}")
+
+        try:
+            records = json.loads(stripped)
+        except Exception as e:
+            raise RuntimeError("Failed to parse Space-Track GP JSON response.") from e
+
+        if not isinstance(records, list) or not records:
+            raise SpaceTrackNoTLEError(nid, f"Space-Track GP query returned no records. URL: {url}")
+
+        _save_cached_gp(cache_path, records)
+        cached_records = records
+
+    idx = _index_gp_records_by_norad(cached_records)
+    rec = idx.get(nid)
+    if not rec:
+        raise SpaceTrackNoTLEError(nid, f"No TLE found in cached Space-Track GP dataset for NORAD {nid}.")
+
+    l1 = rec.get("TLE_LINE1")
+    l2 = rec.get("TLE_LINE2")
+    if not (isinstance(l1, str) and isinstance(l2, str) and l1.strip() and l2.strip()):
+        raise SpaceTrackNoTLEError(nid, f"Cached GP record for NORAD {nid} is missing TLE lines.")
+
+    name = rec.get("OBJECT_NAME")
+    if not isinstance(name, str) or not name.strip():
+        name = _satcat_name(nid)
+
+    return (name.strip() if isinstance(name, str) else None), l1.strip(), l2.strip()
 
 def fetch_tle_bulk(
     norad_ids: Iterable[int],
-    identity: str = 'dstannar@calpoly.edu',
-    password: str = 'sxiAzkbs8M-jPQg',
+    identity: Optional[str] = None,
+    password: Optional[str] = None,
     cache_dir: str = CACHE_DIR_TLE,
 ) -> Dict[int, Tuple[Optional[str], str, str]]:
     """
-    Bulk helper with identical policy:
-      - Serve from per-ID cache (12h) or global cache (12h).
-      - If global cache is stale/missing, do **one** global /class/gp "now-3" refresh.
-      - For any IDs still missing, allow up to **10 objects/hour** via a **single**
-        combined fallback gp call and fill results from that.
+    Bulk helper for fetching newest TLEs for many NORAD ids.
+
+    Uses the same global GP cache and rate-state enforcement as `fetch_tle()`.
     """
-    wanted = [int(n) for n in norad_ids]
+    ids = [int(n) for n in norad_ids]
     results: Dict[int, Tuple[Optional[str], str, str]] = {}
-
-    # 1) Per-ID cache
-    missing: List[int] = []
-    for nid in wanted:
-        per_id_cache = os.path.join(cache_dir, f"{nid}.tle")
-        lines = _cache_read_lines(per_id_cache, PER_ID_TTL_S)
-        if lines:
-            results[nid] = _normalize_triplet(lines)
-        else:
-            missing.append(nid)
-
-    if not missing:
+    if not ids:
         return results
 
-    # 2) Global cache
-    idx = _load_global_index(GLOBAL_TTL_S)
-    if idx:
-        for nid in list(missing):
-            if nid in idx:
-                results[nid] = idx[nid]
-                per_id_cache = os.path.join(cache_dir, f"{nid}.tle")
-                name, l1, l2 = results[nid]
-                if name:
-                    _cache_write_lines(per_id_cache, [f"0 {name}", l1, l2])
-                else:
-                    _cache_write_lines(per_id_cache, [l1, l2])
-                missing.remove(nid)
-    else:
-        # 2b) If no global cache, refresh once
-        sess = _st_login_session(identity, password, timeout=REQUEST_TIMEOUT)
-        idx = _refresh_global_now3(sess)  # one global /class/gp call
-        for nid in list(missing):
-            if nid in idx:
-                results[nid] = idx[nid]
-                per_id_cache = os.path.join(cache_dir, f"{nid}.tle")
-                name, l1, l2 = results[nid]
-                if name:
-                    _cache_write_lines(per_id_cache, [f"0 {name}", l1, l2])
-                else:
-                    _cache_write_lines(per_id_cache, [l1, l2])
-                missing.remove(nid)
+    cache_path = _cache_file(cache_dir)
+    cached_records = _load_cached_gp(cache_path, _CACHE_HOURS)
 
-    if not missing:
-        return results
+    if cached_records is None:
+        # Delegate to `fetch_tle()` to ensure rate-state is enforced consistently,
+        # but avoid N API calls by performing the single bulk refresh here.
+        now = datetime.now(timezone.utc)
+        request_log = _prune_old_requests(_load_rate_state(), now)
 
-    # 3) Fallback combined query for remaining IDs (quota: 10 objects/hour)
-    allow = _fallback_quota_take(len(missing))
-    if allow <= 0:
-        # nothing left in quota; return what we have and let caller handle misses
-        return results
+        one_minute_ago = now - timedelta(minutes=1)
+        recent_minute = [ts for ts in request_log if ts >= one_minute_ago]
+        if len(recent_minute) >= _MAX_REQUESTS_PER_MINUTE:
+            raise SpaceTrackRateLimitError(
+                "Space-Track request suppressed (30/min limit). "
+                f"{len(recent_minute)} requests logged in the last 60 seconds."
+            )
 
-    ask = missing[:allow]
-    sess = _st_login_session(identity, password, timeout=REQUEST_TIMEOUT)
-    partial = _fallback_query_gp_latest_combined(sess, ask)  # one HTTP GET for up to 'allow' objects
-    for nid in ask:
-        if nid in partial:
-            results[nid] = partial[nid]
-            per_id_cache = os.path.join(cache_dir, f"{nid}.tle")
-            name, l1, l2 = results[nid]
-            # adorn with satcat name if needed
-            if not name:
-                satname = _satcat_name(nid)
-                if satname:
-                    name = satname
-                    results[nid] = (name, l1, l2)
-            if name:
-                _cache_write_lines(per_id_cache, [f"0 {name}", l1, l2])
-            else:
-                _cache_write_lines(per_id_cache, [l1, l2])
+        if len(request_log) >= _MAX_REQUESTS_PER_HOUR:
+            raise SpaceTrackRateLimitError(
+                "Space-Track request suppressed (300/hour limit). "
+                f"{len(request_log)} requests logged in the last hour."
+            )
+
+        if request_log:
+            last_gp = max(request_log)
+            if now - last_gp < timedelta(hours=1):
+                raise SpaceTrackRateLimitError(
+                    "Space-Track GP query suppressed (1/hour guideline). "
+                    f"Last GP query was at {last_gp.isoformat()} UTC."
+                )
+
+        request_log.append(now)
+        _save_rate_state(request_log)
+
+        username, pw = _get_credentials(identity, password)
+        url = _build_gp_query_url()
+        response_text = _http_get_spacetrack_json(url, username, pw)
+        stripped = response_text.strip()
+        if not stripped:
+            raise RuntimeError(f"Space-Track GP query returned an empty response. URL: {url}")
+
+        try:
+            records = json.loads(stripped)
+        except Exception as e:
+            raise RuntimeError("Failed to parse Space-Track GP JSON response.") from e
+
+        if not isinstance(records, list) or not records:
+            raise RuntimeError(f"Space-Track GP query returned no records. URL: {url}")
+
+        _save_cached_gp(cache_path, records)
+        cached_records = records
+
+    idx = _index_gp_records_by_norad(cached_records)
+    for nid in ids:
+        rec = idx.get(nid)
+        if not rec:
+            continue
+        l1 = rec.get("TLE_LINE1")
+        l2 = rec.get("TLE_LINE2")
+        if not (isinstance(l1, str) and isinstance(l2, str) and l1.strip() and l2.strip()):
+            continue
+        name = rec.get("OBJECT_NAME")
+        if not isinstance(name, str) or not name.strip():
+            name = _satcat_name(nid)
+        results[nid] = ((name.strip() if isinstance(name, str) else None), l1.strip(), l2.strip())
+
     return results
-
-def spacetrack_logout(identity: str, password: str) -> None:
-    """Best-effort logout (not required; included for completeness)."""
-    try:
-        sess = _st_login_session(identity, password, timeout=REQUEST_TIMEOUT)
-        time.sleep(POLITE_DELAY_S)
-        sess.get(ST_LOGOUT_URL, timeout=REQUEST_TIMEOUT, headers={"User-Agent": USER_AGENT})
-    except Exception:
-        pass

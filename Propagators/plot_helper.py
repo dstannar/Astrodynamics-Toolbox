@@ -110,6 +110,7 @@ def animate_composite_figure(
     background_alpha=0.25,    # alpha for non-active/parking
     active_alpha=1.0,         # alpha for the active line
     save_path=None,           # ".mp4" or ".gif"
+    moving_points=None,       # optional: list of moving marker specs (see below)
     show=True
 ):
     """
@@ -118,6 +119,19 @@ def animate_composite_figure(
     Non-animated (parking) lines are visible the whole time (dim).
 
     Prefer label_order=['leg1 label', 'leg2 label', ...].
+
+    moving_points (optional)
+    ------------------------
+    A list of dicts, each like:
+      {
+        "label": "Earth",
+        "xyz": (x, y, z),     # arrays of equal length, in plot units
+        "color": "tab:blue",
+        "marker": "o",
+        "markersize": 6,
+        "alpha": 1.0,
+      }
+    These markers move throughout the full animation timeline (frames_total).
     """
     assert composite_fig.axes, "Composite figure has no axes."
     ax = composite_fig.axes[0]
@@ -200,9 +214,41 @@ def animate_composite_figure(
             ln.set_alpha(0.0)
             ln.set_data_3d([], [], [])
 
+    # Optional moving point artists
+    point_artists = []
+    point_specs = []
+    if moving_points:
+        for spec in moving_points:
+            if not isinstance(spec, dict) or "xyz" not in spec:
+                continue
+            x, y, z = spec["xyz"]
+            x = np.asarray(x); y = np.asarray(y); z = np.asarray(z)
+            if len(x) == 0 or len(x) != len(y) or len(x) != len(z):
+                continue
+            pt, = ax.plot(
+                [], [], [],
+                linestyle="None",
+                marker=spec.get("marker", "o"),
+                markersize=float(spec.get("markersize", 6)),
+                color=spec.get("color", "k"),
+                alpha=float(spec.get("alpha", 1.0)),
+                label=spec.get("label", None),
+            )
+            point_artists.append(pt)
+            point_specs.append((x, y, z))
+
+    def _point_index_for_frame(f, N):
+        if frames_total <= 1 or N <= 1:
+            return 0
+        return int(np.clip(np.round((float(f) / float(frames_total - 1)) * float(N - 1)), 0, N - 1))
+
     def init():
         ax.view_init(elev=base_elev, azim=base_azim)
-        return [ln for _, ln in labeled]
+        # initialize moving points to frame 0
+        for pt, (x, y, z) in zip(point_artists, point_specs):
+            i0 = _point_index_for_frame(0, len(x))
+            pt.set_data_3d([x[i0]], [y[i0]], [z[i0]])
+        return [ln for _, ln in labeled] + point_artists
 
     def update(f):
         seg = which_segment(f)
@@ -231,7 +277,12 @@ def animate_composite_figure(
             ln.set_alpha(0.0)
             ln.set_data_3d([], [], [])
 
-        return [ln for _, ln in labeled]
+        # Update moving points for this global frame f
+        for pt, (x, y, z) in zip(point_artists, point_specs):
+            ii = _point_index_for_frame(f, len(x))
+            pt.set_data_3d([x[ii]], [y[ii]], [z[ii]])
+
+        return [ln for _, ln in labeled] + point_artists
 
     anim = FuncAnimation(
         composite_fig, update, init_func=init,

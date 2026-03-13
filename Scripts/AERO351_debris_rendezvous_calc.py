@@ -16,10 +16,8 @@ from MathHelpers.formatting import format_time
 # because we expect divide by zero warnings in Lambert solve loop as not all tofs will be physical
 import warnings
 warnings.filterwarnings("ignore")
-# everything earth orbiting
-mu = muE
 
-def scanLambertCandidates(orbit1, orbit2, missionTimePre=0, dt=50, bestGuess=None):
+def scanLambertCandidates(orbit1, orbit2, missionTimePre=0, dt=86400*150, bestGuess=None, mu=muE):
     """
       - Align epochs to a common absolute time: max(epoch1, epoch2) + missionTimePre
       - Scan using the nested (t1, t2) loops
@@ -41,24 +39,24 @@ def scanLambertCandidates(orbit1, orbit2, missionTimePre=0, dt=50, bestGuess=Non
     # Final common absolute time = max(epoch1, epoch2) + missionTimePre
     if o1.JDsJ2000 > o2.JDsJ2000:
         dSecs = float(JDays_to_secs(o1.JDsJ2000 - o2.JDsJ2000))
-        r2, v2 = Propagate(prop_time=dSecs + float(missionTimePre), Orbit=o2).lagrange_coeff()
+        r2, v2 = Propagate(prop_time=dSecs + float(missionTimePre), Orbit=o2, mu=mu).lagrange_coeff()
         o2.set_state(r2, v2)
-        r1, v1 = Propagate(prop_time=float(missionTimePre), Orbit=o1).lagrange_coeff()
+        r1, v1 = Propagate(prop_time=float(missionTimePre), Orbit=o1, mu=mu).lagrange_coeff()
         o1.set_state(r1, v1)
         orbit1_toTime = float(missionTimePre)
         orbit2_toTime = float(missionTimePre) + dSecs
     elif o1.JDsJ2000 < o2.JDsJ2000:
         dSecs = float(JDays_to_secs(o2.JDsJ2000 - o1.JDsJ2000))
-        r1, v1 = Propagate(prop_time=dSecs + float(missionTimePre), Orbit=o1).lagrange_coeff()
+        r1, v1 = Propagate(prop_time=dSecs + float(missionTimePre), Orbit=o1, mu=mu).lagrange_coeff()
         o1.set_state(r1, v1)
-        r2, v2 = Propagate(prop_time=float(missionTimePre), Orbit=o2).lagrange_coeff()
+        r2, v2 = Propagate(prop_time=float(missionTimePre), Orbit=o2, mu=mu).lagrange_coeff()
         o2.set_state(r2, v2)
         orbit1_toTime = float(missionTimePre) + dSecs
         orbit2_toTime = float(missionTimePre)
     else:
-        r1, v1 = Propagate(prop_time=float(missionTimePre), Orbit=o1).lagrange_coeff()
+        r1, v1 = Propagate(prop_time=float(missionTimePre), Orbit=o1, mu=mu).lagrange_coeff()
         o1.set_state(r1, v1)
-        r2, v2 = Propagate(prop_time=float(missionTimePre), Orbit=o2).lagrange_coeff()
+        r2, v2 = Propagate(prop_time=float(missionTimePre), Orbit=o2, mu=mu).lagrange_coeff()
         o2.set_state(r2, v2)
         orbit1_toTime = float(missionTimePre)
         orbit2_toTime = float(missionTimePre)
@@ -69,7 +67,8 @@ def scanLambertCandidates(orbit1, orbit2, missionTimePre=0, dt=50, bestGuess=Non
 
     satOrbit = o1.copy()  # working copy used for perigee guard
 
-    Tsyn = float(synodic_period(o1.sma, o2.sma))
+    Tsyn = float(synodic_period(o1.sma, o2.sma, mu=mu))
+    print(Tsyn)
 
     if bestGuess is None:
         t1 = 0.0
@@ -86,7 +85,7 @@ def scanLambertCandidates(orbit1, orbit2, missionTimePre=0, dt=50, bestGuess=Non
     # Main time loops
     while t1 <= dep_horizon + 1e-12:
         # State of o1 at departure t1 (relative to mission start)
-        r1New, v1New = Propagate(prop_time=t1, Orbit=o1).lagrange_coeff()
+        r1New, v1New = Propagate(prop_time=t1, Orbit=o1, mu=mu).lagrange_coeff()
         satOrbit.set_state(r1New, v1New)
 
         # [8] departTime_abs is seconds since mission start (relative)
@@ -99,17 +98,17 @@ def scanLambertCandidates(orbit1, orbit2, missionTimePre=0, dt=50, bestGuess=Non
             t2 = max(t1 + float(dt), t2_low)  # keep TOF > 0 and respect refine window
             t2_end = t2_high
 
-        while t2 <= t2_end + 1e-12:
+        while t2 <= t2_end:
             # reset satOrbit to pre-transfer state
             satOrbit.set_state(r1New, v1New)
 
             tof = float(t2 - t1)
 
             # State of o2 at arrival t2 (relative to mission start)
-            r2New, v2New = Propagate(prop_time=t2, Orbit=o2).lagrange_coeff()
+            r2New, v2New = Propagate(prop_time=t2, Orbit=o2, mu=mu).lagrange_coeff()
 
             # Lambert solve
-            v1_req, v2_req, exitFlag = Lambert(r1New, r2New, tof).robust_solve()
+            v1_req, v2_req, exitFlag = Lambert(mu=mu).robust_solve(r1New, r2New, tof)
             if exitFlag != 1 or not np.all(np.isfinite(np.r_[v1_req, v2_req])):
                 t2 += float(dt)
                 continue
@@ -128,7 +127,7 @@ def scanLambertCandidates(orbit1, orbit2, missionTimePre=0, dt=50, bestGuess=Non
                 if alt >= 100.0:
                     dvMagOld = dvMag
                     bestResult = [
-                        o1.satnum, o2.satnum,
+                        1,1,#o1.satnum, o2.satnum,
                         r1New, r2New, tof,
                         dv1, dv2, dvMag,
                         departTime_abs,
@@ -148,7 +147,7 @@ def scanLambertCandidates(orbit1, orbit2, missionTimePre=0, dt=50, bestGuess=Non
     return bestResult
 
 
-def execute_lambert(debrisSAT, orbit1, orbit2, missionTimePre=0):
+def execute_lambert(debrisSAT, orbit1, orbit2, missionTimePre=0, mu=muE):
     """
     Plane/velo+phase and Hohmann have already modified `debrisSAT`.
     Now compute a Lambert transfer from the chaser's current orbit (debrisSAT)
@@ -157,28 +156,29 @@ def execute_lambert(debrisSAT, orbit1, orbit2, missionTimePre=0):
     missionTime = missionTimePre
 
     # scan using the chaser as o1, target as o2
-    roughGuess = scanLambertCandidates(debrisSAT, orbit2, missionTimePre=missionTimePre)
+    roughGuess = scanLambertCandidates(debrisSAT, orbit2, missionTimePre=missionTimePre, mu=mu)
     if roughGuess is None:
         raise RuntimeError("Lambert Failed")
     print("Rough Done")
-    lambSoln   = scanLambertCandidates(debrisSAT, orbit2, dt=1, bestGuess=roughGuess, missionTimePre=missionTimePre)
+    print(roughGuess)
+    lambSoln   = scanLambertCandidates(debrisSAT, orbit2, dt=86400, bestGuess=roughGuess, missionTimePre=missionTimePre, mu=mu)
     print("Fine Done")
 
     # lambSoln fields used :
     # [4]=tof, [5]=dv1, [6]=dv2, [7]=dvMag, [8]=departTime_abs, [15]=o1_toTime, [16]=o2_toTime
 
     # seed chaser & target to the scanner's mission-start epoch (ODE)
-    rs,  vs  = Propagate(prop_time=lambSoln[15], Orbit=debrisSAT).twobody_ODE()
+    rs,  vs  = Propagate(prop_time=lambSoln[15], Orbit=debrisSAT, mu=mu).twobody_ODE()
     debrisSAT.set_state(rs, vs)
-    r2s, v2s = Propagate(prop_time=lambSoln[16], Orbit=orbit2).twobody_ODE()
+    r2s, v2s = Propagate(prop_time=lambSoln[16], Orbit=orbit2, mu=mu).twobody_ODE()
     orbit2.set_state(r2s, v2s)
 
     # recalculate Lambert using ODE-propagated states for numerical robustness
     # ODE states at departure (from seeded epoch) and arrival
-    r1_dep, v1_pre = Propagate(prop_time=lambSoln[8],Orbit=debrisSAT).twobody_ODE()
-    r2_arr, v2_pre = Propagate(prop_time=lambSoln[8] + lambSoln[4], Orbit=orbit2).twobody_ODE()
+    r1_dep, v1_pre = Propagate(prop_time=lambSoln[8],Orbit=debrisSAT, mu=mu).twobody_ODE()
+    r2_arr, v2_pre = Propagate(prop_time=lambSoln[8] + lambSoln[4], Orbit=orbit2, mu=mu).twobody_ODE()
 
-    v1_req, v2_req, flag = Lambert(r1_dep, r2_arr, float(lambSoln[4])).robust_solve()
+    v1_req, v2_req, flag = Lambert(mu=mu).robust_solve(r1_dep, r2_arr, float(lambSoln[4]))
     if flag != 1 or not np.all(np.isfinite(np.r_[v1_req, v2_req])):
         raise RuntimeError("Lambert failed")
 
@@ -192,11 +192,11 @@ def execute_lambert(debrisSAT, orbit1, orbit2, missionTimePre=0):
     lambSoln[14] = v2_pre
 
     # plot the departure orbit for context, and the target orbit
-    _, _, dep_orbit_fig = Propagate(prop_time=debrisSAT.period, Orbit=debrisSAT).twobody_ODE(plot=True)
-    _, _, arr_orbit_fig = Propagate(prop_time=orbit2.period,    Orbit=orbit2).twobody_ODE(plot=True)
+    _, _, dep_orbit_fig = Propagate(prop_time=debrisSAT.period, Orbit=debrisSAT, mu=mu).twobody_ODE(plot=True)
+    _, _, arr_orbit_fig = Propagate(prop_time=orbit2.period,    Orbit=orbit2, mu=mu).twobody_ODE(plot=True)
 
     # Depart: coast to departure time and apply dv1 exactly where the scan computed it
-    rSat1, vSat1, leg1   = Propagate(prop_time=lambSoln[8], Orbit=debrisSAT).twobody_ODE(plot=True)
+    rSat1, vSat1, leg1   = Propagate(prop_time=lambSoln[8], Orbit=debrisSAT, mu=mu).twobody_ODE(plot=True)
     debrisSAT.set_state(rSat1, vSat1 + lambSoln[5])
     # log
     lam_dep_time = missionTime + lambSoln[8]
@@ -204,7 +204,7 @@ def execute_lambert(debrisSAT, orbit1, orbit2, missionTimePre=0):
     missionTime += lambSoln[8]
 
     # Transfer coast and arrival burn dv2
-    rSat2, vSat2, leg2   = Propagate(prop_time=lambSoln[4], Orbit=debrisSAT).twobody_ODE(plot=True)
+    rSat2, vSat2, leg2   = Propagate(prop_time=lambSoln[4], Orbit=debrisSAT, mu=mu).twobody_ODE(plot=True)
     debrisSAT.set_state(rSat2, vSat2 + lambSoln[6])
     # log
     lam_arr_time = missionTime + lambSoln[4]
@@ -212,7 +212,7 @@ def execute_lambert(debrisSAT, orbit1, orbit2, missionTimePre=0):
     missionTime += lambSoln[4]
 
     # March the target forward by the same elapsed time from the same epoch
-    rO2, vO2 = Propagate(prop_time=lambSoln[8] + lambSoln[4], Orbit=orbit2).twobody_ODE()
+    rO2, vO2 = Propagate(prop_time=lambSoln[8] + lambSoln[4], Orbit=orbit2, mu=mu).twobody_ODE()
     orbit2.set_state(rO2, vO2)
 
     # accuracy check (units: km, km/s)
@@ -259,7 +259,7 @@ def asc_desc_node(row, lhat):
     rhat = row[1] / np.linalg.norm(row[1])
     return 1 if float(np.dot(rhat, lhat)) >= 0.0 else -1
 
-def plane_velo_change_and_phase(orbit1, orbit2):
+def plane_velo_change_and_phase(orbit1, orbit2, mu=muE):
     """
     Implements a combined plane change and velocity change to go from GEO orbit to MEO orbit
     Curtis notes that combining velo change and plane change is strictly cheaper than doing both seperately, so here we are
@@ -532,7 +532,7 @@ def plane_velo_change_and_phase(orbit1, orbit2):
     return dv_total, dv_ledger, missionTime, epochTLE, pvp_fig, satOrbit, pvp_report
 
 
-def hohmann_helper(debrisSAT, orbit2, missionTimePre=0.0):
+def hohmann_helper(debrisSAT, orbit2, missionTimePre=0.0, mu=muE):
     '''
     Single-burn, strictly coplanar Hohmann staging step.
     Sets the other apsis of orbit1's new ellipse to the instantaneous radius of orbit2.

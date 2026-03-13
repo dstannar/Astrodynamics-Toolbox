@@ -51,9 +51,12 @@ class Propagate:
             state = np.concatenate((r0, v0, [float(m0)]))
 
         def ivp_wrapper(t,y):
-            return self.twobodymotion(t, y, self.thrust, self.burnTime, self.Isp)
+            return self.twobodymotion(t, y, self.thrust, self.burnTime, self.Isp, MU=self.mu)
 
         solution = solve_ivp(ivp_wrapper, tspan, state, rtol=rtol, atol=atol)
+
+        if m0 is not None:
+            mNew = solution.y[6, -1]
         
         if plot:
             fig = plt.figure()
@@ -78,16 +81,28 @@ class Propagate:
         r = y[:3, -1] # [x_f, y_f, z_f]
         v = y[3:6, -1] # [vx_f, vy_f, vz_f]
 
-        if self.verbose == False:
-            if plot == True:
-                return r, v, fig
-            elif plot == False:
-                return r, v
-        elif self.verbose == True:
-            if plot == True:
-                return r, v, solution, fig
-            elif plot == False:
-                return r, v, solution
+        if m0 is None:
+            if self.verbose == False:
+                if plot == True:
+                    return r, v, fig
+                elif plot == False:
+                    return r, v
+            elif self.verbose == True:
+                if plot == True:
+                    return r, v, solution, fig
+                elif plot == False:
+                    return r, v, solution
+        elif m0 is not None:
+            if self.verbose == False:
+                if plot == True:
+                    return r, v, mNew, fig
+                elif plot == False:
+                    return r, v, mNew
+            elif self.verbose == True:
+                if plot == True:
+                    return r, v, mNew, solution, fig
+                elif plot == False:
+                    return r, v, mNew, solution
 
 
 
@@ -160,15 +175,16 @@ class Propagate:
         ddz = -MU * z / rmag**3
 
         mdot = 0
-        if (thrust > 0) and (time <= burnTime):
+        if (thrust != 0) and (time <= burnTime):
             vmag = np.linalg.norm([vx, vy, vz])
             if (vmag > 0) and np.isfinite(m) and (m > 0):
+                Tmag = abs(thrust)
                 a_T = (thrust / m) #km/s**2
                 ddx += a_T * state[3] / vmag
                 ddy += a_T * state[4] / vmag
                 ddz += a_T * state[5] / vmag
                 g0 = 9.80665/1000                  # km/s^2
-                mdot = -thrust / (Isp * g0)   # kg/s
+                mdot = -Tmag / (Isp * g0)   # kg/s
 
         dstate = [vx, vy, vz, ddx, ddy, ddz]
         if len(state) == 7:

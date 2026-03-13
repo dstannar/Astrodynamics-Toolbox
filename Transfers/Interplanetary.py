@@ -1,7 +1,9 @@
 import numpy as np
-from MathHelpers.constants import muS, PlanetData, rE, muE
+from MathHelpers.constants import muS, PlanetData, rE, muE, AU, rSun
 from MathHelpers.time_to_perigee import time_to_perigee
 from Propagators.Propagate import Propagate
+from Transfers.Lambert import Lambert
+from Orbits.KeplerianOrbit import KeplerianOrbit
 
 class Interplanetary():
     def __init__(self, mu=muS):
@@ -96,7 +98,7 @@ class Interplanetary():
         soi = smaP * (muP / muStar)**(2/5)
         return soi
 
-    def departure(self, r_plst, r_per, parking_alt, muP = muE, rPlan=rE):
+    def depart_to_hohmann(self, r_plst, r_per, parking_alt, muP = muE, rPlan=rE):
         muStar = self.mu
         r_apo = r_plst
         a_trans = (r_per + r_apo) / 2
@@ -113,6 +115,98 @@ class Interplanetary():
         v_park = np.sqrt(muP / r_per_park)
         dv = v_p - v_park
         return dv, Vinf
+    
+    def depart_to_lambert(self, radPlan, alt_park, vinf_dep, muP):
+        '''
+        Assumes circular parking orbit
+        '''
+        rper_park = radPlan + alt_park
+        v_park = np.sqrt(muP / rper_park)
+        v_infmag = np.linalg.norm(vinf_dep)
+        v_esc = np.sqrt(2 * muP / rper_park)
+        vper_hyp = np.sqrt(v_infmag**2 + v_esc**2)
+        dv_dep = abs(vper_hyp - v_park)
+
+        return dv_dep
+
+    def arrival_from_lambert(self, radPlan, alt_per, alt_apo, vinf_arr, muP):
+        rper_park = radPlan + alt_per
+        rapo_park = radPlan + alt_apo
+        a_cap = 0.5*(rper_park + rapo_park)
+        v_infmag = np.linalg.norm(vinf_arr)
+        vesc_per = np.sqrt(2 * muP / rper_park)
+        vper_hyp = np.sqrt(v_infmag**2 + vesc_per**2)
+        vcap_per = np.sqrt(muP * (2/rper_park - 1/a_cap))
+        dv_arr = abs(vcap_per - vper_hyp)
+
+        return dv_arr
+
+    def lambert_cruise(self, Orbit1, Orbit2, tof, shortWay):
+        '''
+        Inputs: 
+            Orbit1 = orbit object AT depart position
+            Orbit2 = orbit object AT arrive position
+            tof = difference between Orbit1 and Orbit2 time (sec)
+        Outputs:
+
+        '''
+        # init Lambert with self.mu
+        interplanetaryLambert = Lambert(mu=muS)
+        # solve lambert with given r1, r2, tof, shortwayFlag
+        v1, v2, exitFlag = interplanetaryLambert.robust_solve(Orbit1.r, Orbit2.r, tof, shortWay=shortWay)
+        # find delta Vs
+        vinf_dep = v1 - Orbit1.v
+        vinf_arr = v2 - Orbit2.v
+
+        cruise = {
+            "vLambert_dep": v1,
+            "vLambert_arr": v2,
+            "vinf_dep": vinf_dep,
+            "vinf_arr": vinf_arr,
+            "tof": tof,
+            "shortWay": shortWay,
+            "exitFlag": exitFlag,
+        }
+
+        if exitFlag == 1:
+            return cruise
+        else:
+            return None
+        
+    def patched_lambert_transfer(self, Orbit1, Orbit2, tof, shortWay, muP1, muP2, radPlan1, radPlan2, depalt_park, arralt_per, arralt_apo):
+        # get vinf
+        cruise = self.lambert_cruise(Orbit1, Orbit2, tof, shortWay)
+        if cruise is None:
+            return None
+        vLambert_dep = cruise["vLambert_dep"]
+        vLambert_arr = cruise["vLambert_arr"]
+        vinf_dep     = cruise["vinf_dep"]
+        vinf_arr     = cruise["vinf_arr"]
+
+        dv_dep = self.depart_to_lambert(radPlan1, depalt_park, vinf_dep, muP1)
+        dv_arr = self.arrival_from_lambert(radPlan2, arralt_per, arralt_apo, vinf_arr, muP2)
+        dv_tot = dv_dep + dv_arr
+
+        # check for star intersection
+        TransferOrbit = KeplerianOrbit(r=Orbit1.r, v=Orbit1.v + vinf_dep, mu=self.mu)
+        r_closest_approach = TransferOrbit.r_per / AU
+
+        result = {
+            "dv_dep": dv_dep,
+            "dv_arr": dv_arr,
+            "dv_total": dv_tot,
+            "transfer_orbit": TransferOrbit,
+            "tof": tof,
+            "vLambert_dep": vLambert_dep,
+            "vLambert_arr": vLambert_arr,
+            "vinf_dep": vinf_dep,
+            "vinf_arr": vinf_arr,
+            "shortWay": shortWay,
+            "exitFlag": cruise["exitFlag"],
+        }
+
+        return result
+
     
     def hohmann_gravity_assist(self, inner_planet: str, flyby_planet: str, periapsis_alt: float, sunlit=True):
         muStar = self.mu
@@ -175,5 +269,27 @@ class Interplanetary():
         dV_imparted = np.linalg.norm(V2_vec - V1_vec)
 
         return dV_imparted
+    
+    def gravity_assist_from_transfer_ellipse(self, T_trans, rtrans_apo, flyby_alt, planet, trailing):
+        planetData = PlanetData[planet]
+        a_trans = self.mu**(1/3) * (T_trans/(2*np.pi))**(2/3)
+        rtrans_per = 2*a_trans - rtrans_apo
+        v1 = np.sqrt(self.mu * (2/rtrans_apo - 1/a_trans))
+        vPlanet = np.sqrt(self.mu / rtrans_apo)
+        vinf = abs(v1 - vPlanet)
+        
+        rplanet_per = planetData["radius_km"] + flyby_alt
+        ecc_flyby = 1 + rplanet_per * vinf**2 / planetData["mu"]
+        turnAngle = 2*np.asin(1/ecc_flyby)
+        heliocentric_dV = 2 * vinf * np.sin(turnAngle/2) # imparted deltaV
+        if trailing==True:
+            sign = 1
+        else:
+            sign = -1
+
+        print(vinf)
+        print(ecc_flyby)
+        return heliocentric_dV, sign
+
 
 

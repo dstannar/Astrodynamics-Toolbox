@@ -1,9 +1,51 @@
 import numpy as np
+from MathHelpers.solve_kepler import solve_kepler
+from MathHelpers.constants import muS
 
 AU_KM = 149597870.0  # km per astronomical unit
 
-# FROM DR. ABERCROMBY OF CAL POLY
+# THE FUNCTION planetary_elements2() WAS WRITTEN BY DR. ABERCROMBY OF CAL POLY
 
+def planetary_elements(planet_id: int, T:float):
+    '''
+    This is a wrapper function for planetary_elements2 that returns standard COEs (hmag, ecc, ta, raan, inc, argp)
+        that my Orbit classes like
+    Inputs
+        planet_id : int
+            Planet identifier:
+            1 = Mercury
+            2 = Venus
+            3 = Earth
+            4 = Mars
+            5 = Jupiter
+            6 = Saturn
+            7 = Uranus
+            8 = Neptune
+        T: float
+            Time in Julian centuries from J2000.0 (T = (JD - 2451545.0)/36525).
+
+    Outputs:
+        hmag, ecc, ta, raan, inc, argp
+    '''
+    # call func
+    a, ecc, incDeg, raanDeg, w_hatDeg, LDeg = planetary_elements2(planet_id=planet_id, T=T)
+    # to rads
+    inc = np.deg2rad(incDeg)
+    raan = np.deg2rad(raanDeg)
+    w_hat = np.deg2rad(w_hatDeg)
+    L = np.deg2rad(LDeg)
+
+    # get coes I want
+    argp = w_hat - raan
+    M = L - w_hat
+    E = solve_kepler(M, ecc)
+    ta = 2.0 * np.arctan2(
+        np.sqrt(1.0 + ecc) * np.sin(E/2.0),
+        np.sqrt(1.0 - ecc) * np.cos(E/2.0)
+    )
+    hmag = np.sqrt(muS * a * (1 - ecc**2))
+
+    return hmag, ecc, ta, raan, inc, argp
 
 def planetary_elements2(planet_id: int, T: float):
     """

@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: astrodynamics-toolbox
+Version: 0.1.0
+Summary: Astrodynamics utilities and mission design tools.
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.20
+Requires-Dist: scipy>=1.8
+Requires-Dist: matplotlib>=3.5
+Requires-Dist: requests>=2.0
+Requires-Dist: pygad>=3.0
+Provides-Extra: dev
+Requires-Dist: jupyter; extra == "dev"
+
+# Astrodynamics Toolbox
+# Drew Stannard-Stockton
+
+THIS README IS IN PROGRESS
+
+This repository serves as an object-oriented, standalone astrodynamics toolbox. The only dependencies required are numpy and matplotlib. 
+
+References:
+* Curtis
+* Vallado

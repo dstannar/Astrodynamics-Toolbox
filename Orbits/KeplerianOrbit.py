@@ -3,6 +3,7 @@ from MathHelpers.constants import muE
 from MathHelpers.none_check import all_set, none_of
 from Time.conversions import dateTime_to_JDays, AbsJDay_to_J2000JDay
 from datetime import datetime
+import copy as _copy
 
 class KeplerianOrbit:
     def __init__(self, r=None, v=None, hmag=None, ecc=None, 
@@ -208,3 +209,8 @@ class KeplerianOrbit:
         self.v = vnew
         # get COEs (includes circular special cases)
         self.state_to_coes()
+
+    
+    def copy(self):
+        """Return a copy of this orbit object"""
+        return _copy.deepcopy(self)
