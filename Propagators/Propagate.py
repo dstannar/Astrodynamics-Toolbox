@@ -7,7 +7,7 @@ from MathHelpers.stumpff import stumpffC, stumpffS
 from mpl_toolkits.mplot3d import Axes3D
 
 class Propagate:
-    def __init__(self, prop_time, Orbit=None, r=None, v=None, thrust=0, burnTime = None, Isp = None, mass=None, rtol = 1e-12, atol = 1e-12, mu=muE, verbose=False):
+    def __init__(self, prop_time, Orbit=None, r=None, v=None, thrust=0, burnTime = None, Isp = None, mass=None, rtol = 1e-12, atol = 1e-12, mu=muE, verbose=True):
         self.Orbit = Orbit # orbit object
         self.r = r
         self.v = v
@@ -147,8 +147,7 @@ class Propagate:
         elif self.verbose == False:
             return r1, v1
 
-    @staticmethod
-    def twobodymotion(t, y, thrust, burnTime, Isp, MU = muE):
+    def twobodymotion(self, t, y, thrust, burnTime, Isp):
         '''
         Returns derivative of state variables
         supports thrust
@@ -161,6 +160,7 @@ class Propagate:
         '''
         state = y
         time = t
+        MU = self.mu
 
         if len(state) == 7:
             x, y, z, vx, vy, vz, m = state

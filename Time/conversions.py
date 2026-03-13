@@ -74,3 +74,82 @@ def dateTime_to_sidereal(year:float, month:float, day:float, hour:float, minute:
     theta -= np.floor(theta/360.0)*360.0
 
     return theta
+
+# MJD2000 helpers for GTOP shenanigans
+
+def MJD2000_to_AbsJDay(MJD2000):
+    '''
+    Input:
+        MJD2000 : float
+            days since MJD2000 epoch (2000-01-01 00:00 UT), where
+            MJD2000 epoch = JD 2451544.5
+    Output:
+        JD_abs : float
+            absolute Julian Date (days)
+    '''
+    JD_MJD2000 = JD_J2000 - 0.5
+    return float(MJD2000) + JD_MJD2000
+
+
+def AbsJDay_to_MJD2000(AbsJDay):
+    '''
+    Input:
+        AbsJDay : float
+            absolute Julian Date (days)
+    Output:
+        MJD2000 : float
+            days since MJD2000 epoch (JD 2451544.5)
+    '''
+    JD_MJD2000 = JD_J2000 - 0.5
+    return float(AbsJDay) - JD_MJD2000
+
+
+def MJD2000_to_J2000JDay(MJD2000):
+    '''
+    Input:
+        MJD2000 : float
+            days since MJD2000 epoch (JD 2451544.5)
+    Output:
+        J2000JDay : float
+            days since J2000.0 epoch (JD 2451545.0)
+
+    Note:
+        J2000 is +0.5 day after MJD2000 epoch, so:
+            J2000JDay = MJD2000 - 0.5
+    '''
+    return float(MJD2000) - 0.5
+
+
+def J2000JDay_to_MJD2000(J2000JDay):
+    '''
+    Input:
+        J2000JDay : float
+            days since J2000.0 epoch (JD 2451545.0)
+    Output:
+        MJD2000 : float
+            days since MJD2000 epoch (JD 2451544.5)
+    '''
+    return float(J2000JDay) + 0.5
+
+
+def gtop_decision_vector_to_mjd2000_epochs(T_daysMJD):
+    '''
+    GTOP-style decision vector interpretation:
+        T_daysMJD = [t0, dt1, dt2, ..., dtN]
+    where:
+        t0  = epoch of event 0 in MJD2000 days
+        dtk = duration from event k-1 to event k (days)
+
+    Input:
+        T_daysMJD : array-like length (N+1)
+
+    Output:
+        mjd_epochs : ndarray length (N+1)
+            cumulative epochs in MJD2000 days
+    '''
+    T = np.asarray(T_daysMJD, dtype=float).reshape(-1)
+    mjd_epochs = np.zeros_like(T)
+    mjd_epochs[0] = float(T[0])
+    for k in range(1, len(T)):
+        mjd_epochs[k] = mjd_epochs[k - 1] + float(T[k])
+    return mjd_epochs

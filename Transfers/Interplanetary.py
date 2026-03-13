@@ -270,26 +270,71 @@ class Interplanetary():
 
         return dV_imparted
     
-    def gravity_assist_from_transfer_ellipse(self, T_trans, rtrans_apo, flyby_alt, planet, trailing):
-        planetData = PlanetData[planet]
-        a_trans = self.mu**(1/3) * (T_trans/(2*np.pi))**(2/3)
-        rtrans_per = 2*a_trans - rtrans_apo
-        v1 = np.sqrt(self.mu * (2/rtrans_apo - 1/a_trans))
-        vPlanet = np.sqrt(self.mu / rtrans_apo)
-        vinf = abs(v1 - vPlanet)
-        
-        rplanet_per = planetData["radius_km"] + flyby_alt
-        ecc_flyby = 1 + rplanet_per * vinf**2 / planetData["mu"]
-        turnAngle = 2*np.asin(1/ecc_flyby)
-        heliocentric_dV = 2 * vinf * np.sin(turnAngle/2) # imparted deltaV
-        if trailing==True:
-            sign = 1
-        else:
-            sign = -1
+    def flyby_turn_angle(self, vinf_mag, rp_km, muP):
+        # Unpowered hyperbolic flyby turn angle (radians)
+        vinf_mag = float(vinf_mag)
+        rp_km = float(rp_km)
+        muP = float(muP)
+        if vinf_mag <= 0.0 or rp_km <= 0.0 or muP <= 0.0:
+            return 0.0
+        e = 1.0 + (rp_km * vinf_mag * vinf_mag) / muP
+        x = 1.0 / e
+        x = max(-1.0, min(1.0, x))
+        return float(2.0 * np.arcsin(x))
 
-        print(vinf)
-        print(ecc_flyby)
-        return heliocentric_dV, sign
+    def flyby_rp_required(self, vinf_mag, turn_angle_rad, muP):
+        # Required periapsis radius (km) for an unpowered flyby turn (radians)
+        vinf_mag = float(vinf_mag)
+        turn_angle_rad = float(turn_angle_rad)
+        muP = float(muP)
+        if vinf_mag <= 0.0 or muP <= 0.0:
+            return float("inf")
+        # e = 1/sin(delta/2), rp = mu/vinf^2 * (e - 1)
+        s = np.sin(0.5 * turn_angle_rad)
+        if s <= 0.0:
+            return float("inf")
+        e = 1.0 / s
+        return float(muP / (vinf_mag * vinf_mag) * (e - 1.0))
+
+    def lambert_flyby(self, v_sc_in, v_sc_out, v_planet, muP, rp_min_km=0.0, tol=1e-8):
+        # Check if Lambert inbound/outbound velocities can be connected by a flyby.
+        # Returns a small dict with required rp and feasibility.
+        v_sc_in = np.asarray(v_sc_in, float).reshape(3)
+        v_sc_out = np.asarray(v_sc_out, float).reshape(3)
+        v_planet = np.asarray(v_planet, float).reshape(3)
+
+        vinf_in = v_sc_in - v_planet
+        vinf_out = v_sc_out - v_planet
+        Vin = float(np.linalg.norm(vinf_in))
+        Vout = float(np.linalg.norm(vinf_out))
+
+        out = {
+            "Vin": Vin,
+            "Vout": Vout,
+            "turn_angle_rad": 0.0,
+            "rp_required_km": float("inf"),
+            "rp_min_km": float(rp_min_km),
+            "feasible_unpowered": False,
+        }
+
+        if Vin <= 0.0 or Vout <= 0.0:
+            return out
+
+        # Unpowered flyby requires |v_inf| to be (essentially) conserved
+        if abs(Vin - Vout) > tol * max(1.0, Vin, Vout):
+            out["turn_angle_rad"] = float(np.arccos(max(-1.0, min(1.0, float(np.dot(vinf_in, vinf_out) / (Vin * Vout))))))
+            return out
+
+        # Required turning angle between v_inf vectors
+        c = float(np.dot(vinf_in, vinf_out) / (Vin * Vout))
+        c = max(-1.0, min(1.0, c))
+        turn = float(np.arccos(c))
+        out["turn_angle_rad"] = turn
+
+        rp_req = self.flyby_rp_required(Vin, turn, muP)
+        out["rp_required_km"] = float(rp_req)
+        out["feasible_unpowered"] = (rp_req >= float(rp_min_km))
+        return out
 
 
 
